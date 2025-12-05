@@ -1,0 +1,2765 @@
+'''
+Plane framed structures analysis tool, based on the direct stiffness 
+method.
+
+MAIN MODULE - Contains the GUI mainloop and all the window definitions.
+'''
+                    
+import tkinter as tk
+from tkinter import ttk, messagebox, Menu, filedialog, PhotoImage
+from canvas import drawingCanvas
+from classes import Material, Section, CreateToolTip, Scrollable
+import functions as fn
+import action
+import numpy as np
+import run
+import loadsave
+import sys
+import os
+
+version = '1.0'
+
+
+def resource_path(relative_path):
+    '''
+    Get absolute path to resource, works for dev and for PyInstaller (onefile),
+    based on a snippet from Stack Overflow.
+    '''
+    try:
+        # PyInstaller creates a temp folder and stores path in _MEIPASS
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.abspath(".")
+
+    return os.path.join(base_path, relative_path)
+
+
+def main():
+    window_main = tk.Tk()
+    menu_bar = Menu(window_main)
+
+    window_main.state('zoomed')
+    frame_upper = ttk.Frame(window_main)
+    frame_sidebar = ttk.Frame(window_main)
+    frame_buttonbar = ttk.Frame(window_main)
+    Sta = drawingCanvas(window_main)
+    frame_parent = ttk.Frame(window_main)  #Used as parent for toplevels
+
+    frame_upper.pack(side=tk.TOP, fill=tk.X)
+    frame_sidebar.pack(side=tk.LEFT, fill=tk.Y)
+    Sta.frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+    frame_buttonbar.pack(side=tk.LEFT, fill=tk.Y)
+    window_main.bind_all('<Control-z>', lambda _: action.undo(Sta))
+    window_main.bind_all('<Control-y>', lambda _: action.redo(Sta))
+    window_main.title('STA ' + version + ' - ' + Sta.currentFile)
+
+    m1 = Material('Steel', 20000, 0.000012)
+    m2 = Material('Aluminum', 7000, 0.000024)
+    m3 = Material(' concrete', 2400, 0.000001)
+
+    s1 = Section('Circle 20 cm')
+    s1.circle(20, 0)
+
+    Sta.materialsList.append(m3)
+    Sta.materialsList.append(m1)
+    Sta.materialsList.append(m2)
+
+    Sta.sectionsList.append(s1)
+
+  
+    def fn_quit():
+        '''
+        Handles quitting the program.
+        '''
+        if Sta.fileChanged == 1:
+            res = messagebox.askyesnocancel("To save", " Do you want to save the" +
+                                            "changes in " +
+                                            Sta.currentFile + "?")
+            if res:
+                fn_save()
+            elif res is not None:
+                window_main.destroy()
+        else:
+            window_main.destroy()
+
+    def fn_new():
+        '''
+        Clears the whole file and creates a new one.
+        '''
+        if Sta.fileChanged == 1:
+            res = messagebox.askyesnocancel("To save", " Do you want to save the" +
+                                            " changes in" +
+                                            Sta.currentFile + "?")
+            if res == 'yes':
+                fn_save()
+            elif res is None:
+                return
+
+        Sta.fileChanged = 0
+        Sta.clickType = 'select'
+        Sta.currentDir, Sta.currentFile = None, 'Untitled'
+        Sta.nodesList, Sta.membersList = [], []
+        Sta.materialsList, Sta.sectionsList = [], []
+        Sta.loadcasesList, Sta.comboFactors = ['Case 1'], []
+        Sta.COMBINATIONSList = []
+        Sta.permanent = [[], []]
+        Sta.results, Sta.resultClick = [], [-1, 0]
+        Sta.actions, Sta.undone = [], []
+        Sta.canvas.yview_moveto(0.475)
+        Sta.scale, Sta.mouseAnchor = 1.0, [0, 0]
+        Sta.canvas.xview_moveto(0.495)
+
+        m1 = Material('Steel', 20000, 0.000012)
+        m2 = Material('Aluminum', 7000, 0.000024)
+        m3 = Material('Concrete ', 2400, 0.000001)
+
+        s1 = Section('Circle 20 cm')
+        s1.circle(20, 0)
+
+        Sta.materialsList.append(m3)
+        Sta.materialsList.append(m1)
+        Sta.materialsList.append(m2)
+
+        Sta.sectionsList.append(s1)
+        action.runActions(Sta)
+
+    def fn_open():
+        '''
+        Manages the open file dialog window.
+        '''
+        if Sta.fileChanged == 1:
+            result = messagebox.askyesnocancel("To save", "Do you want to save the " +
+                                               "changes in" +
+                                               Sta.currentFile + '?')
+            if result == 'yes':
+                fn_save()
+            elif result is None:
+                return
+
+        fname = filedialog.askopenfilename(master=None,
+                                           title='Open...',
+                                           filetypes=(('ZAP files',
+                                                       '*.zap'),
+                                                      ('All files',
+                                                      '*.*')))
+
+        try:
+            loadsave.load(Sta, fname)
+        except Exception:
+            if not fname:
+                return
+            else:
+                messagebox.showwarning('Error',
+                                       'Unable to open the file.')
+                window_main.lift()
+                return
+        else:
+            window_main.title('STA ' + version + ' - ' + Sta.currentFile)
+            Sta.fileChanged = 0
+            Sta.clickType = 'select'
+            action.runActions(Sta)
+
+    def fn_save():
+        '''
+        Manages the save file dialog window.
+        '''
+        if Sta.currentDir is None:
+            fname = filedialog.asksaveasfilename(master=None,
+                                                 title='.To save...',
+                                                 defaultextension='zap',
+                                                 filetypes=(('ZAP files',
+                                                             '*.zap'),
+                                                            ('All files',
+                                                             '*.*')))
+        else:
+            fname = Sta.currentDir + '/' + Sta.currentFile
+
+        try:
+            loadsave.save(Sta, fname)
+        except Exception:
+            if not fname:
+                return
+
+            else:
+                messagebox.showwarning('error',
+                                       'Unable to save the file.')
+                window_main.lift()
+                return
+        else:
+            window_main.title('STA ' + version + ' - ' + Sta.currentFile)
+            Sta.fileChanged = 0
+
+    def fn_saveAs():
+        '''
+        Manages the save file dialog window.
+        '''
+        file = filedialog.asksaveasfilename(master=None,
+                                            title='Save as...',
+                                            defaultextension='zap')
+
+        try:
+            loadsave.save(Sta, file)
+        except Exception:
+            messagebox.showwarning('Error',
+                                   'Unable to save the file.')
+            window_main.lift()
+            return
+        else:
+            window_main.title('STA ' + version + ' - ' + Sta.currentFile)
+            Sta.fileChanged = 0
+
+    def fn_selection():
+        '''
+        Closes all toplevel windows and sets the canvas to 'selection mode'.
+        '''
+        Sta.clickType = 'select'
+        Sta.redraw()
+        for child in frame_parent.winfo_children():
+            child.destroy()
+        return
+
+    def fn_newNode():
+        '''
+        Opens the 'New node' toplevel window.
+        '''
+        def fn_apply():
+            '''
+            Adds a new node to the structure.
+            '''
+            p = [fn.entryGet(entry_X, 'float'), fn.entryGet(entry_Y, 'float')]
+            p = [fn.unitConvert(Sta.units[0], 'cm', p[0]),
+                 fn.unitConvert(Sta.units[0], 'cm', p[1])]
+
+            # Checks if the input values are valid.
+            if 'error' in p:
+                messagebox.showwarning('Error', 'Please enter valid coordinates.')
+            else:
+                # Checks if there is already a node in the given coordinates.
+                for node in Sta.nodesList:
+                    if p == node.coords:
+                        messagebox.showwarning('Error',
+                                               'There is already a point in ' +
+                                               'given coordinates.')
+                        break
+                else:
+                    action.newNode(Sta, p)
+
+        def fn_close():
+            '''
+            Closes the toplevel window and returns to the main canvas.
+            '''
+            Sta.clickType = 'select'
+            Sta.redraw()
+            Sta.statusbar.set('Select an element.')
+            window_newNode.destroy()
+
+        Sta.clickType = 'newNode'
+        Sta.redraw()
+        for child in frame_parent.winfo_children():
+            child.destroy()
+
+        # Window definition and attributes
+        mainX, mainY = window_main.winfo_x(), window_main.winfo_y()
+        window_newNode = tk.Toplevel(frame_parent, padx=15, pady=5)
+        #window_newNode.iconbitmap(resource_path('resources/000'))
+        window_newNode.title('Spots')
+        window_newNode.geometry("+%d+%d" % (mainX + 550, mainY+30))
+        window_newNode.resizable(False, False)
+        window_newNode.attributes('-topmost', 'true')
+        frame_newNode = ttk.LabelFrame(window_newNode, text='add point')
+        window_newNode.protocol('WM_DELETE_WINDOW', fn_close)
+        window_newNode.focus_set()
+
+        Sta.statusbar.set('Select the point position.')
+
+        # Window contents
+        frame_newNode.grid_rowconfigure(0, minsize=10)
+        frame_newNode.grid_rowconfigure(2, minsize=15)
+        frame_newNode.grid_rowconfigure(4, minsize=10)
+        frame_newNode.grid_columnconfigure(1, minsize=20)
+        frame_newNode.grid_columnconfigure(3, minsize=10)
+
+        unit = '(' + Sta.units[0] + ')'
+        ttk.Label(frame_newNode,
+                  text='Coordinate X:').grid(row=1, column=0, sticky=tk.W)
+        ttk.Label(frame_newNode,
+                  text='Coordinate Y:').grid(row=3, column=0, sticky=tk.W)
+        ttk.Label(frame_newNode, text=unit).grid(row=1, column=4, sticky=tk.E)
+        ttk.Label(frame_newNode, text=unit).grid(row=3, column=4, sticky=tk.E)
+
+        entry_X = ttk.Entry(frame_newNode, width=8,
+                            textvariable=Sta.mousepos[0], justify=tk.RIGHT)
+        entry_Y = ttk.Entry(frame_newNode, width=8,
+                            textvariable=Sta.mousepos[1], justify=tk.RIGHT)
+        entry_X.grid(row=1, column=2)
+        entry_Y.grid(row=3, column=2)
+
+        button_apply = ttk.Button(window_newNode, text='Add',
+                                  command=fn_apply, width=15)
+        button_close = ttk.Button(window_newNode, text='Close',
+                                  command=fn_close, width=15)
+
+        frame_newNode.pack(side=tk.TOP, fill=tk.BOTH)
+        button_apply.pack(side=tk.LEFT, fill=tk.X)
+        button_close.pack(side=tk.RIGHT, fill=tk.X)
+
+    def fn_materials():
+        '''
+        Opens the 'Manage materials' toplevel window.
+        '''
+        def fn_apply():
+            '''
+            Handles the applying of a material to members.
+            '''
+            Sta.clickType = 'material'
+            Sta.currentApply = [Sta.selectedMaterial.get()]
+            Sta.statusbar.set('Select a bar to apply.')
+            Sta.canvas.focus_set()
+
+        def fn_applyAll():
+            '''
+            Applies the current material to every member.
+            '''
+            action.matApplyAll(Sta, Sta.selectedMaterial.get())
+
+        def fn_newEdit():
+            '''
+            Adds a new material or changes an existing one.
+            '''
+            name = fn.entryGet(entry_name, 'string')
+            E = fn.entryGet(entry_E, 'float')
+            alpha = fn.entryGet(entry_alpha, 'float')
+
+            if 'error' in [E, alpha] or E*alpha == 0 or not name:
+                messagebox.showwarning('error', 'Enter valid values.')
+                return
+
+            E = fn.unitConvert(Sta.units[5], 'kN/cm²', E)
+            alpha = fn.unitConvert(Sta.units[6], '1/°C', alpha)
+
+            for material in Sta.materialsList:
+                if material.name == name:
+                    material.elasticity = E
+                    material.thermal = alpha
+                    itemsList = matList.get_children()
+                    item = next((itemsList[i] for i in range(len(itemsList))
+                                 if itemsList[i] == name), None)
+                    matList.delete(item)
+                    i = itemsList.index(item)
+                    matList.insert('', i, material.name, text=material.name,
+                                   values=(fn.unitConvert('kN/cm²',
+                                                          Sta.units[5],
+                                                          material.elasticity),
+                                           fn.unitConvert('1/°C', Sta.units[6],
+                                                          material.thermal)))
+                    return
+
+            else:
+                newMaterial = Material(name, E, alpha)
+                Sta.materialsList.append(newMaterial)
+                matList.insert('', 'end', newMaterial.name,
+                               text=newMaterial.name,
+                               values=(fn.unitConvert('kN/cm²',
+                                                      Sta.units[5], E),
+                                       fn.unitConvert('1/°C',
+                                                      Sta.units[6], alpha)))
+
+        def fn_delete():
+            '''
+            Deletes the current material.
+            '''
+            name = matList.item(matList.focus()).get('text')
+            for member in Sta.membersList:
+                if member.material == name:
+                    messagebox.showwarning('error',
+                                           'There are bars with this material.')
+                    return
+            else:
+                material = next((material for material in Sta.materialsList
+                                if material.name == name), None)
+                Sta.materialsList.remove(material)
+                matList.delete(matList.selection())
+                entry_name.delete(0, tk.END)
+                entry_E.delete(0, tk.END)
+                entry_alpha.delete(0, tk.END)
+
+        def fn_selection(event):
+            '''
+            Handles the treeview selection event.
+            '''
+            name = matList.item(matList.focus()).get('text')
+            material = next((material for material in Sta.materialsList
+                            if material.name == name), None)
+            Sta.selectedMaterial.set(material.name)
+            entry_name.delete(0, tk.END)
+            entry_E.delete(0, tk.END)
+            entry_alpha.delete(0, tk.END)
+            entry_name.insert(tk.END, material.name)
+            entry_E.insert(tk.END, fn.unitConvert('kN/cm²', Sta.units[5],
+                                                  material.elasticity))
+            entry_alpha.insert(tk.END, fn.unitConvert('1/°C', Sta.units[6],
+                                                      material.thermal))
+
+        def fn_close():
+            '''
+            Closes the window.
+            '''
+            Sta.clickType = 'select'
+            Sta.redraw()
+            Sta.statusbar.set('select an element.')
+            window_materials.destroy()
+
+        Sta.clickType = 'select'
+        Sta.redraw()
+        for child in frame_parent.winfo_children():
+            child.destroy()
+
+        # Window definition and attributes
+        mainX, mainY = window_main.winfo_x(), window_main.winfo_y()
+
+        window_materials = tk.Toplevel(frame_parent, padx=15, pady=5)
+       # window_materials.iconbitmap(resource_path('resources/000'))
+        window_materials.title('manage materials')
+        window_materials.geometry("+%d+%d" % (mainX + 300, mainY+30))
+        window_materials.resizable(False, False)
+        window_materials.protocol('WM_DELETE_WINDOW', fn_close)
+        window_materials.focus_set()
+
+        frame_materialsList = ttk.LabelFrame(window_materials,
+                                             text='Materials')
+        frame_newMaterial = ttk.LabelFrame(window_materials,
+                                           text='properties')
+        frame_materialsList.pack(side=tk.LEFT, fill=tk.Y)
+        frame_newMaterial.pack(side=tk.LEFT, fill=tk.Y)
+
+        # Materials list frame
+        matList = ttk.Treeview(frame_materialsList, columns=(0, 1))
+        matList.heading('#0', text='Name')
+        matList.column('#0', minwidth=0, width=100)
+        Eunit = 'Elasticity (' + Sta.units[5] + ')'
+        alphaUnit = 'Coef.  thermal(' + Sta.units[6] + ')'
+        matList.heading(0, text=Eunit)
+        matList.column(0, minwidth=0, width=130)
+        matList.heading(1, text=alphaUnit)
+        matList.column(1, minwidth=0, width=130)
+
+        matList.bind('<<TreeviewSelect>>', fn_selection)
+
+        for material in Sta.materialsList:
+            matList.insert('', 'end', material.name, text=material.name,
+                           values=(fn.unitConvert('kN/cm²', Sta.units[5],
+                                                  material.elasticity),
+                                   fn.unitConvert('1/°C', Sta.units[6],
+                                                  material.thermal)))
+
+        matList.grid(row=0, column=0, columnspan=2)
+
+        button_apply = ttk.Button(frame_materialsList, text='apply material',
+                                  width=29, command=fn_apply)
+        button_applyAll = ttk.Button(frame_materialsList,
+                                     text='apply to all', width=29,
+                                     command=fn_applyAll)
+
+        button_apply.grid(row=1, column=0)
+        button_applyAll.grid(row=1, column=1)
+
+        # Properties frame
+        frame_newMaterial.grid_rowconfigure(0, minsize=40)
+        frame_newMaterial.grid_rowconfigure(2, minsize=15)
+        frame_newMaterial.grid_rowconfigure(4, minsize=15)
+        frame_newMaterial.grid_rowconfigure(6, minsize=93)
+        frame_newMaterial.grid_columnconfigure(0, minsize=10)
+        frame_newMaterial.grid_columnconfigure(2, minsize=17)
+        frame_newMaterial.grid_columnconfigure(6, minsize=10)
+
+        ttk.Label(frame_newMaterial,
+                  text='Name:').grid(row=1, column=1, sticky=tk.W)
+        ttk.Label(frame_newMaterial,
+                  text=Eunit + ':').grid(row=3, column=1, sticky=tk.W)
+        ttk.Label(frame_newMaterial,
+                  text=alphaUnit + ':').grid(row=5, column=1, sticky=tk.W)
+        entry_name = ttk.Entry(frame_newMaterial, width=10, justify=tk.RIGHT)
+        entry_E = ttk.Entry(frame_newMaterial, width=10, justify=tk.RIGHT)
+        entry_alpha = ttk.Entry(frame_newMaterial, width=10, justify=tk.RIGHT)
+
+        entry_name.grid(row=1, column=3, columnspan=2)
+        entry_E.grid(row=3, column=3, columnspan=2)
+        entry_alpha.grid(row=5, column=3, columnspan=2)
+
+        button_newEdit = ttk.Button(frame_newMaterial, text='add/edit',
+                                    width=20, command=fn_newEdit)
+        button_delete = ttk.Button(frame_newMaterial, text='turn off material',
+                                   width=20, command=fn_delete)
+
+        button_newEdit.grid(row=7, column=1, columnspan=2)
+        button_delete.grid(row=7, column=3, columnspan=2)
+
+    def fn_sections():
+        '''
+        Opens the 'Manage sections' toplevel window.
+        '''
+        def fn_apply():
+            '''
+            Handles the applying of a section to members.
+            '''
+            Sta.clickType = 'section'
+            Sta.currentApply = [Sta.selectedSection.get()]
+            Sta.statusbar.set('Select a bar to apply.')
+            Sta.canvas.focus_set()
+
+        def fn_applyAll():
+            '''
+            Applies the current section to every member.
+            '''
+            action.secApplyAll(Sta, Sta.selectedSection.get())
+
+        def fn_newEdit():
+            '''
+            Adds a new material or changes an existing one.
+            '''
+            name = fn.entryGet(Sta.entriesList[0], 'string')
+            entries = []
+            for i in range(1, len(Sta.entriesList)):
+                entries.append(fn.entryGet(Sta.entriesList[i], 'float'))
+
+            if 'error' in entries or not name:
+                messagebox.showwarning('error', 'Enter valid values.')
+                return
+
+            sectionType = Sta.sectionType.get()
+
+            if sectionType == 0:
+                units = [9, 8, 7, 7]
+                default = ['cm4', 'cm²', 'cm', 'cm']
+                for i in range(len(entries)):
+                    entries[i] = fn.unitConvert(Sta.units[units[i]],
+                                                default[i], entries[i])
+
+            else:
+                for entry in entries:
+                    entry = fn.unitConvert(Sta.units[7], 'cm', entry)
+
+            if 0 in entries:
+                if sectionType == 1 and entries[1] != 0:
+                    messagebox.showwarning('error', 'Enter valid values.')
+                    return
+                elif sectionType != 1:
+                    messagebox.showwarning('error', 'Enter valid values.')
+                    return
+
+            if sectionType == 1 and entries[1] > entries[0]:
+                messagebox.showwarning('error',
+                                       'The outer diameter must be larger' +
+                                       'than the internal.')
+                return
+
+            for section in Sta.sectionsList:
+                if section.name == name:
+                    if sectionType == 0:
+                        section.generic(entries[0], entries[1],
+                                        entries[2], entries[3])
+                    elif sectionType == 1:
+                        section.circle(entries[0], entries[1])
+                    elif sectionType == 2:
+                        section.rectangle(entries[0], entries[1])
+                    elif sectionType == 3:
+                        section.simmetricI(entries[0], entries[1],
+                                           entries[2], entries[3])
+                    elif sectionType == 4:
+                        section.assimmetricI(entries[0], entries[1],
+                                             entries[2], entries[3],
+                                             entries[4], entries[5])
+                    return
+
+            else:
+                newSection = Section(name)
+                if sectionType == 0:
+                    newSection.generic(entries[0], entries[1],
+                                       entries[2], entries[3])
+                elif sectionType == 1:
+                    newSection.circle(entries[0], entries[1])
+                elif sectionType == 2:
+                    newSection.rectangle(entries[0], entries[1])
+                elif sectionType == 3:
+                    newSection.simmetricI(entries[0], entries[1],
+                                          entries[2], entries[3])
+                elif sectionType == 4:
+                    newSection.assimmetricI(entries[0], entries[1], entries[2],
+                                            entries[3], entries[4], entries[5])
+
+                Sta.sectionsList.append(newSection)
+                secList.insert('', 'end',
+                               newSection.name, text=newSection.name)
+
+        def fn_delete():
+            '''
+            Deletes the current section.
+            '''
+            name = secList.item(secList.focus()).get('text')
+            for member in Sta.membersList:
+                if member.section == name:
+                    messagebox.showwarning('error',
+                                           'There are bars with this section.')
+                    return
+            else:
+                section = next((section for section in Sta.sectionsList
+                                if section.name == name), None)
+                Sta.sectionsList.remove(section)
+                secList.delete(secList.selection())
+
+                for i in range(len(Sta.entriesList)):
+                    Sta.entriesList[i].delete(0, tk.END)
+
+        def fn_selection(event):
+            '''
+            Handles the treeview selection event.
+            '''
+            name = secList.item(secList.focus()).get('text')
+            section = next((section for section in Sta.sectionsList
+                            if section.name == name), None)
+            Sta.selectedSection.set(section.name)
+
+            defaultUnits = [['cm4', 'cm²', 'cm', 'cm'], ['cm', 'cm'],
+                            ['cm', 'cm'], ['cm', 'cm', 'cm', 'cm'],
+                            ['cm', 'cm', 'cm', 'cm', 'cm', 'cm']]
+
+            sectionTypes = ['Generic', 'Circular', 'Rectangular',
+                            'I symmetrical', 'I asymmetric']
+
+            i = sectionTypes.index(section.type)
+            Sta.sectionType.set(i)
+            fn_sectionType()
+
+            for j in range(len(defaultUnits[i])+1):
+                Sta.entriesList[j].delete(0, tk.END)
+                if j == 0:
+                    value = section.name
+                else:
+                    value = fn.unitConvert(defaultUnits[i][j-1],
+                                           Sta.sectionUnits[j-1],
+                                           section.parameters[j-1])
+                Sta.entriesList[j].insert(tk.END, value)
+
+        def fn_sectionType():
+            '''
+            Handles the changes in the properties frame when selecting
+            different section types.
+            '''
+            Sta.entriesList = []
+
+            sectionType = Sta.sectionType.get()
+            if sectionType == 0:
+                text = ['Name', 'Inertia', 'Area',
+                        'Coord. sup.', 'Coord. inf.']
+                Sta.sectionUnits = [Sta.units[9], Sta.units[8],
+                                    Sta.units[7], Sta.units[7]]
+
+            elif sectionType == 1:
+                text = ['Name', 'Dext.', 'Dint.']
+                Sta.sectionUnits = [Sta.units[7], Sta.units[7]]
+
+            elif sectionType == 2:
+                text = ['Name', 'Width', 'Hight']
+                Sta.sectionUnits = [Sta.units[7], Sta.units[7]]
+
+            elif sectionType == 3:
+                text = ['Name', 'bf', 'tf', 'd', 't']
+                Sta.sectionUnits = [Sta.units[7] for i in range(4)]
+
+            elif sectionType == 4:
+                text = ['Name', 'bf1', 'tf1', 'bf2', 'tf2', 'd', 't']
+                Sta.sectionUnits = [Sta.units[7] for i in range(6)]
+
+            for child in frame_temp.winfo_children():
+                child.destroy()
+
+            for i in range(len(text)):
+                if i == 0:
+                    string = text[i] + ':'
+                else:
+                    string = text[i] + ' (' + Sta.sectionUnits[i-1] + '):'
+                ttk.Label(frame_temp,
+                          text=string).grid(row=5+2*i, column=1, sticky=tk.W)
+                Sta.entriesList.append(ttk.Entry(frame_temp,
+                                                 width=10, justify=tk.RIGHT))
+                Sta.entriesList[i].grid(row=5+2*i, column=3)
+
+        def fn_close():
+            '''
+            Closes the window.
+            '''
+            Sta.clickType = 'select'
+            Sta.redraw()
+            Sta.statusbar.set('select an element.')
+            window_sections.destroy()
+
+        # Window definition and attributes
+        mainX, mainY = window_main.winfo_x(), window_main.winfo_y()
+
+        window_sections = tk.Toplevel(frame_parent, padx=15, pady=5)
+       # window_sections.iconbitmap(resource_path('resources/000'))
+        window_sections.title('manage sections')
+        window_sections.geometry("+%d+%d" % (mainX + 300, mainY+30))
+        window_sections.resizable(False, False)
+        window_sections.protocol('WM_DELETE_WINDOW', fn_close)
+        window_sections.focus_set()
+
+        frame_sectionsList = ttk.LabelFrame(window_sections, text='Material')
+        frame_newSection = ttk.LabelFrame(window_sections, text='Property')
+        frame_sectionsList.pack(side=tk.LEFT, fill=tk.Y)
+        frame_newSection.pack(side=tk.LEFT, fill=tk.Y)
+
+        # Materials list frame
+        secList = ttk.Treeview(frame_sectionsList)
+        secList.heading('#0', text='Name')
+
+        secList.bind('<<TreeviewSelect>>', fn_selection)
+
+        for section in Sta.sectionsList:
+            secList.insert('', 'end', section.name, text=section.name)
+        secList.grid(row=0, column=0, columnspan=2)
+
+        button_apply = ttk.Button(frame_sectionsList, text='apply section',
+                                  width=29, command=fn_apply)
+        button_applyAll = ttk.Button(frame_sectionsList,
+                                     text='apply to all',
+                                     width=29, command=fn_applyAll)
+
+        button_apply.grid(row=1, column=0)
+        button_applyAll.grid(row=1, column=1)
+
+        # Properties frame
+        frame_temp = tk.Frame(frame_newSection)
+        frame_temp.grid(row=7, column=1, columnspan=6, sticky=tk.NW)
+        frame_temp.grid_columnconfigure(1, minsize=100)
+        for i in range(20):
+            frame_temp.grid_rowconfigure(i, minsize=8)
+
+        frame_newSection.grid_rowconfigure(7, minsize=300)
+        frame_newSection.grid_columnconfigure(0, minsize=15)
+
+        Sta.sectionType.set(0)
+        Sta.entriesList = []
+        Sta.sectionUnits = []
+
+        ttk.Label(frame_newSection,
+                  text='Type:').grid(row=1, column=1, rowspan=2, sticky=tk.W)
+        types = ['Generic', 'Circle', 'Retangula',
+                 'Isymmetrical', 'I asymmetric']
+        for i in range(5):
+            if i < 3:
+                ttk.Radiobutton(frame_newSection, text=types[i],
+                                variable=Sta.sectionType, value=i,
+                                command=fn_sectionType).grid(row=1,
+                                                             column=3+2*i,
+                                                             sticky=tk.W)
+            else:
+                ttk.Radiobutton(frame_newSection, text=types[i],
+                                variable=Sta.sectionType, value=i,
+                                command=fn_sectionType).grid(row=3,
+                                                             column=3+2*(i-3),
+                                                             sticky=tk.W)
+
+        fn_sectionType()
+
+        button_newEdit = ttk.Button(frame_newSection, text='add/edit',
+                                    width=30, command=fn_newEdit)
+        button_delete = ttk.Button(frame_newSection, text='delete section',
+                                   width=30, command=fn_delete)
+
+        button_newEdit.grid(row=9, column=1, columnspan=3)
+        button_delete.grid(row=9, column=5, columnspan=3)
+
+    def fn_newMember():
+        '''
+        Opens the 'New member' toplevel window.
+        '''
+        def fn_apply():
+            '''
+            Creates a new member, using the specified coordinates.
+            '''
+            P1 = [fn.entryGet(entry_X1, 'float'),
+                  fn.entryGet(entry_Y1, 'float')]
+
+            P2 = [fn.entryGet(entry_X2, 'float'),
+                  fn.entryGet(entry_Y2, 'float')]
+
+            properties = [fn.entryGet(Sta.selectedMaterial, 'string'),
+                          fn.entryGet(Sta.selectedSection, 'string')]
+
+            P1 = [fn.unitConvert(Sta.units[0], 'cm', P1[0]),
+                  fn.unitConvert(Sta.units[0], 'cm', P1[1])]
+            P2 = [fn.unitConvert(Sta.units[0], 'cm', P2[0]),
+                  fn.unitConvert(Sta.units[0], 'cm', P2[1])]
+
+            if 'error' in P1 or 'error' in P2:
+                messagebox.showwarning('error', 'Enter valid coordinates.')
+                return
+
+            if P1 == P2:
+                messagebox.showwarning('error',
+                                       'Enter different coordinates for ' +
+                                       'start and end of bar.')
+                return
+
+            for member in Sta.membersList:
+                if ((P1 == member.p1 and P2 == member.p2) or
+                        (P1 == member.p2 and P2 == member.p1)):
+                    messagebox.showwarning('Error',
+                                           'There is already a bar in the ' +
+                                           'given coordinates.')
+                    return
+
+            if not properties[0]:
+                messagebox.showwarning('Error',
+                                       'Select a material for the bar.')
+                return
+
+            if not properties[1]:
+                messagebox.showwarning('Error',
+                                       'Select a section for the bar.')
+
+            else:
+                action.newMember(Sta, P1, P2, properties)
+
+        def fn_close():
+            '''
+            Closes the window.
+            '''
+            Sta.clickType = 'select'
+            Sta.redraw()
+            for i in range(4):
+                Sta.memberCoords[i].set(0)
+            Sta.statusbar.set('Select an element.')
+            Sta.memberNode = 1
+            window_newMember.destroy()
+
+        def fn_clear():
+            '''
+            Clears the current member end coordinates.
+            '''
+            entry_X1.delete(0, tk.END)
+            entry_Y1.delete(0, tk.END)
+            entry_X2.delete(0, tk.END)
+            entry_Y2.delete(0, tk.END)
+            Sta.canvas.delete('templine')
+            Sta.memberNode = 1
+
+        def fn_callback1(event):
+            Sta.memberNode = 1
+
+        def fn_callback2(event):
+            Sta.memberNode = 2
+
+        Sta.memberNode = 1
+        for coord in Sta.memberCoords:
+            coord.set('')
+
+        Sta.clickType = 'newMember'
+        Sta.redraw()
+        Sta.statusbar.set('Select the starting point of the bar.')
+        for child in frame_parent.winfo_children():
+            child.destroy()
+
+        mat = []
+        sec = []
+        for material in Sta.materialsList:
+            mat.append(material.name)
+        for section in Sta.sectionsList:
+            sec.append(section.name)
+
+        # Window definition and attributes
+        mainX, mainY = window_main.winfo_x(), window_main.winfo_y()
+
+        window_newMember = tk.Toplevel(frame_parent, padx=15, pady=5)
+       # window_newMember.iconbitmap(resource_path('resources/000'))
+        window_newMember.title('bars')
+        window_newMember.attributes('-topmost', 'true')
+        window_newMember.geometry("+%d+%d" % (mainX + 550, mainY+30))
+        window_newMember.resizable(False, False)
+        frame_newMember = ttk.LabelFrame(window_newMember,
+                                         text='add bar')
+        window_newMember.protocol('WM_DELETE_WINDOW', fn_close)
+        window_newMember.focus_set()
+
+        Sta.memberNode = 1
+
+        unit = '(' + Sta.units[0] + ')'
+        ttk.Label(frame_newMember, text='X initial' +
+                  unit + ':').grid(row=1, column=1, sticky=tk.W)
+        ttk.Label(frame_newMember, text='Y initial' +
+                  unit + ':').grid(row=1, column=5, sticky=tk.W)
+
+        ttk.Label(frame_newMember, text='X final ' +
+                  unit + ':').grid(row=3, column=1, sticky=tk.W)
+        ttk.Label(frame_newMember, text='Y final ' +
+                  unit + ':').grid(row=3, column=5, sticky=tk.W)
+
+        ttk.Label(frame_newMember,
+                  text='Material:').grid(row=5, column=1, sticky=tk.W)
+        ttk.Label(frame_newMember,
+                  text='Section:').grid(row=7, column=1, sticky=tk.W)
+
+        entry_X1 = ttk.Entry(frame_newMember, textvariable=Sta.memberCoords[0],
+                             width=6, justify=tk.RIGHT)
+        entry_Y1 = ttk.Entry(frame_newMember, textvariable=Sta.memberCoords[1],
+                             width=6, justify=tk.RIGHT)
+
+        entry_X2 = ttk.Entry(frame_newMember, textvariable=Sta.memberCoords[2],
+                             width=6, justify=tk.RIGHT)
+        entry_Y2 = ttk.Entry(frame_newMember, textvariable=Sta.memberCoords[3],
+                             width=6, justify=tk.RIGHT)
+
+        entry_X1.bind("<1>", fn_callback1)
+        entry_Y1.bind("<1>", fn_callback1)
+        entry_X2.bind("<1>", fn_callback2)
+        entry_Y2.bind("<1>", fn_callback2)
+
+        listbox_materials = ttk.Combobox(frame_newMember,
+                                         textvariable=Sta.selectedMaterial)
+        listbox_materials['values'] = tuple(mat)
+        listbox_materials.delete(0, tk.END)
+
+        if len(mat) != 0:
+            listbox_materials.insert(0, mat[0])
+
+        listbox_materials.config(state='readonly')
+
+        listbox_sections = ttk.Combobox(frame_newMember,
+                                        textvariable=Sta.selectedSection)
+        listbox_sections['values'] = tuple(sec)
+        listbox_sections.delete(0, tk.END)
+
+        if len(sec) != 0:
+            listbox_sections.insert(0, sec[0])
+
+        listbox_sections.config(state='readonly')
+
+        entry_X1.grid(row=1, column=3)
+        entry_Y1.grid(row=1, column=7)
+        entry_X2.grid(row=3, column=3)
+        entry_Y2.grid(row=3, column=7)
+        listbox_materials.grid(row=5, column=2, columnspan=5)
+        listbox_sections.grid(row=7, column=2, columnspan=5)
+
+        button_apply = ttk.Button(window_newMember, text='Add',
+                                  command=fn_apply, width=15)
+        button_reset = ttk.Button(window_newMember, text='Clean',
+                                  command=fn_clear, width=15)
+        button_close = ttk.Button(window_newMember, text='Close',
+                                  command=fn_close, width=15)
+
+        frame_newMember.grid_rowconfigure(0, minsize=10)
+        frame_newMember.grid_rowconfigure(2, minsize=15)
+        frame_newMember.grid_rowconfigure(4, minsize=15)
+        frame_newMember.grid_rowconfigure(6, minsize=15)
+        frame_newMember.grid_rowconfigure(8, minsize=10)
+
+        frame_newMember.grid_columnconfigure(0, minsize=10)
+        frame_newMember.grid_columnconfigure(2, minsize=10)
+        frame_newMember.grid_columnconfigure(4, minsize=15)
+        frame_newMember.grid_columnconfigure(6, minsize=10)
+        frame_newMember.grid_columnconfigure(8, minsize=10)
+
+        frame_newMember.pack(side=tk.TOP, fill=tk.BOTH)
+        button_apply.pack(side=tk.LEFT, fill=tk.X)
+        button_reset.pack(side=tk.LEFT, fill=tk.X)
+        button_close.pack(side=tk.LEFT, fill=tk.X)
+
+    def fn_support():
+        '''
+        Opens the 'Nodal restrictions' toplevel window.
+        '''
+        def fn_selection():
+            '''
+            Toggles entry boxes on or off when selecting support
+            conditions checkboxes.
+            '''
+            if var_RX.get() == 0:
+                entry_KX.config(state=tk.NORMAL)
+                entry_PDX.config(state=tk.DISABLED)
+            else:
+                entry_KX.config(state=tk.DISABLED)
+                entry_PDX.config(state=tk.NORMAL)
+
+            if var_RY.get() == 0:
+                entry_KY.config(state=tk.NORMAL)
+                entry_PDY.config(state=tk.DISABLED)
+            else:
+                entry_KY.config(state=tk.DISABLED)
+                entry_PDY.config(state=tk.NORMAL)
+
+            if var_RZ.get() == 0:
+                entry_KZ.config(state=tk.NORMAL)
+                entry_PDZ.config(state=tk.DISABLED)
+            else:
+                entry_KZ.config(state=tk.DISABLED)
+                entry_PDZ.config(state=tk.NORMAL)
+
+        def fn_apply():
+            '''
+            Applies the current settings to be added to the structure.
+            '''
+            restr = [fn.entryGet(var_RX, 'int'),
+                     fn.entryGet(var_RY, 'int'),
+                     fn.entryGet(var_RZ, 'int'),
+                     fn.entryGet(entry_RAngle, 'float')]
+
+            springs = [fn.entryGet(entry_KX, 'float'),
+                       fn.entryGet(entry_KY, 'float'),
+                       fn.entryGet(entry_KZ, 'float')]
+
+            pdispl = [fn.entryGet(entry_PDX, 'float'),
+                      fn.entryGet(entry_PDY, 'float'),
+                      fn.entryGet(entry_PDZ, 'float')]
+
+            if restr[2] == 'error':
+                messagebox.showwarning('Error', 'Enter valid values.')
+                return
+
+            for i in range(3):
+                if restr[i] == 0:
+                    pdispl[i] = 0
+                    if springs[i] == 'error' or springs[i] < 0:
+                        messagebox.showwarning('Error',
+                                               'Enter valid values.')
+                        return
+                else:
+                    springs[i] = 0
+                    if pdispl[i] == 'error':
+                        messagebox.showwarning('error',
+                                               'Enter valid values.')
+                        return
+
+            springs = [fn.unitConvert(Sta.units[13], 'kN/cm', springs[0]),
+                       fn.unitConvert(Sta.units[13], 'kN/cm', springs[1]),
+                       fn.unitConvert(Sta.units[14], 'kN.cm/rad', springs[2])]
+
+            pdispl = [fn.unitConvert(Sta.units[10], 'cm', pdispl[0]),
+                      fn.unitConvert(Sta.units[10], 'cm', pdispl[1]),
+                      fn.unitConvert(Sta.units[11], 'rad', pdispl[2])]
+
+            restr[3] = fn.unitConvert(Sta.units[12], 'rad', restr[3])
+
+            Sta.clickType = 'support'
+            Sta.currentApply = [restr[0], restr[1], restr[2],
+                                restr[3], springs[0], springs[1],
+                                springs[2], pdispl[0], pdispl[1], pdispl[2]]
+
+            Sta.statusbar.set('Select a point to apply.')
+
+        def fn_close():
+            '''
+            Closes the window.
+            '''
+            Sta.clickType = 'select'
+            Sta.redraw()
+            Sta.statusbar.set('select an element.')
+            window_support.destroy()
+
+        # Main window
+        Sta.clickType = 'select'
+        Sta.redraw()
+
+        for child in frame_parent.winfo_children():
+            child.destroy()
+
+        mainX, mainY = window_main.winfo_x(), window_main.winfo_y()
+        window_support = tk.Toplevel(frame_parent, padx=15, pady=5)
+        #window_support.iconbitmap(resource_path('resources/000'))
+        window_support.title('supports and springs')
+        window_support.geometry("+%d+%d" % (mainX + 550, mainY+30))
+        window_support.resizable(False, False)
+
+        frame_support = ttk.LabelFrame(window_support,
+                                       text='nodal constraints')
+        frame_springs = ttk.LabelFrame(window_support,
+                                       text='spring constants')
+        frame_pdispl = ttk.LabelFrame(window_support,
+                                      text='Prescribed displacements')
+
+        window_support.protocol('WM_DELETE_WINDOW', fn_close)
+        window_support.attributes('-topmost', 'true')
+        window_support.focus_set()
+
+        # Displacement restrictions
+        ttk.Label(frame_support,
+                  text='Direction X:').grid(row=1, column=1, sticky=tk.W)
+        ttk.Label(frame_support,
+                  text='Direction Y:').grid(row=3, column=1, sticky=tk.W)
+        ttk.Label(frame_support,
+                  text='Direction Z:').grid(row=5, column=1, sticky=tk.W)
+        ttk.Label(frame_support,
+                  text='Angle (' + Sta.units[12] + '):').grid(row=7, column=1,
+                                                               sticky=tk.W)
+
+        # Spring constants
+        ttk.Label(frame_springs, text='Const. X (' +
+                  Sta.units[13] + '):').grid(row=1, column=1, sticky=tk.W)
+        ttk.Label(frame_springs, text='Const. Y (' +
+                  Sta.units[13] + '):').grid(row=3, column=1, sticky=tk.W)
+        ttk.Label(frame_springs, text='Const. Z (' +
+                  Sta.units[14] + '):').grid(row=5, column=1, sticky=tk.W)
+
+        # Prescribed displacements
+        ttk.Label(frame_pdispl, text='Direction. X (' +
+                  Sta.units[10] + '):').grid(row=1, column=1, sticky=tk.W)
+        ttk.Label(frame_pdispl, text='Direction. Y (' +
+                  Sta.units[10] + '):').grid(row=3, column=1, sticky=tk.W)
+        ttk.Label(frame_pdispl, text='Direction. Z (' +
+                  Sta.units[11] + '):').grid(row=5, column=1, sticky=tk.W)
+
+        var_RX = tk.IntVar(value=0)
+        var_RY = tk.IntVar(value=0)
+        var_RZ = tk.IntVar(value=0)
+
+        entry_RX = tk.Checkbutton(frame_support, text='Restricted',
+                                  variable=var_RX, command=fn_selection)
+        entry_RY = tk.Checkbutton(frame_support, text='Restricted',
+                                  variable=var_RY, command=fn_selection)
+        entry_RZ = tk.Checkbutton(frame_support, text='Restricted',
+                                  variable=var_RZ, command=fn_selection)
+        entry_RAngle = ttk.Entry(frame_support, width=6, justify=tk.RIGHT)
+
+        entry_KX = ttk.Entry(frame_springs, width=6, justify=tk.RIGHT)
+        entry_KY = ttk.Entry(frame_springs, width=6, justify=tk.RIGHT)
+        entry_KZ = ttk.Entry(frame_springs, width=6, justify=tk.RIGHT)
+
+        entry_PDX = ttk.Entry(frame_pdispl, width=6, justify=tk.RIGHT)
+        entry_PDY = ttk.Entry(frame_pdispl, width=6, justify=tk.RIGHT)
+        entry_PDZ = ttk.Entry(frame_pdispl, width=6, justify=tk.RIGHT)
+
+        entry_PDX.config(state=tk.DISABLED)
+        entry_PDY.config(state=tk.DISABLED)
+        entry_PDZ.config(state=tk.DISABLED)
+
+        entry_RX.grid(row=1, column=3)
+        entry_RY.grid(row=3, column=3)
+        entry_RZ.grid(row=5, column=3)
+        entry_RAngle.grid(row=7, column=3, sticky=tk.E)
+
+        entry_KX.grid(row=1, column=3)
+        entry_KY.grid(row=3, column=3)
+        entry_KZ.grid(row=5, column=3)
+
+        entry_PDX.grid(row=1, column=3)
+        entry_PDY.grid(row=3, column=3)
+        entry_PDZ.grid(row=5, column=3)
+
+        button_apply = ttk.Button(window_support,
+                                  text='Apply', command=fn_apply)
+        button_close = ttk.Button(window_support,
+                                  text='Close', command=fn_close)
+
+        frame_support.grid(row=0, column=0, columnspan=2)
+        frame_springs.grid(row=1, column=0, columnspan=2)
+        frame_pdispl.grid(row=2, column=0, columnspan=2)
+        button_apply.grid(row=3, column=0)
+        button_close.grid(row=3, column=1)
+
+        frame_support.grid_rowconfigure(0, minsize=10)
+        frame_support.grid_rowconfigure(2, minsize=10)
+        frame_support.grid_rowconfigure(4, minsize=10)
+        frame_support.grid_rowconfigure(6, minsize=10)
+        frame_support.grid_rowconfigure(8, minsize=10)
+        frame_support.grid_columnconfigure(0, minsize=10)
+        frame_support.grid_columnconfigure(2, minsize=65)
+        frame_support.grid_columnconfigure(4, minsize=10)
+
+        frame_springs.grid_rowconfigure(0, minsize=10)
+        frame_springs.grid_rowconfigure(2, minsize=10)
+        frame_springs.grid_rowconfigure(4, minsize=10)
+        frame_springs.grid_rowconfigure(6, minsize=10)
+        frame_springs.grid_columnconfigure(0, minsize=10)
+        frame_springs.grid_columnconfigure(2, minsize=35)
+        frame_springs.grid_columnconfigure(4, minsize=10)
+
+        frame_pdispl.grid_rowconfigure(0, minsize=10)
+        frame_pdispl.grid_rowconfigure(2, minsize=10)
+        frame_pdispl.grid_rowconfigure(4, minsize=10)
+        frame_pdispl.grid_rowconfigure(6, minsize=10)
+        frame_pdispl.grid_columnconfigure(0, minsize=10)
+        frame_pdispl.grid_columnconfigure(2, minsize=60)
+        frame_pdispl.grid_columnconfigure(4, minsize=10)
+
+    def fn_hinges():
+        '''
+        Opens the 'Add hinges' toplevel window.
+        '''
+        def fn_hingeNode():
+            Sta.clickType = 'hingeNode'
+
+        def fn_hingeStart():
+            Sta.clickType = 'hingeStart'
+
+        def fn_hingeEnd():
+            Sta.clickType = 'hingeEnd'
+
+        def fn_hingeBoth():
+            Sta.clickType = 'hingeBoth'
+
+        def fn_hingeRemove():
+            Sta.clickType = 'hingeRemove'
+
+        def fn_close():
+            '''
+            Closes the window.
+            '''
+            Sta.clickType = 'select'
+            Sta.redraw()
+            Sta.statusbar.set('Selecione um elemento.')
+            window_hinges.destroy()
+
+        Sta.clickType = 'select'
+        Sta.redraw()
+
+        for child in frame_parent.winfo_children():
+            child.destroy()
+
+        mainX, mainY = window_main.winfo_x(), window_main.winfo_y()
+        window_hinges = tk.Toplevel(frame_parent, padx=15, pady=5)
+       # window_hinges.iconbitmap(resource_path('resources/000'))
+        window_hinges.title('hinge')
+        window_hinges.geometry("+%d+%d" % (mainX + 550, mainY+30))
+        window_hinges.resizable(False, False)
+        frame_hinges = ttk.LabelFrame(window_hinges, text='nodal releases')
+        window_hinges.protocol('WM_DELETE_WINDOW', fn_close)
+        window_hinges.attributes('-topmost', 'true')
+        window_hinges.focus_set()
+
+        frame_hinges.pack()
+
+        button_nodehinge = ttk.Button(frame_hinges, text='hingeNode',
+                                      command=fn_hingeNode)
+        button_starthinge = ttk.Button(frame_hinges, text='hingeStart ' +
+                                       'initial', command=fn_hingeStart)
+        button_endhinge = ttk.Button(frame_hinges, text=' hingeEnd' +
+                                     'final', command=fn_hingeEnd)
+        button_bothnodes = ttk.Button(frame_hinges, text='hingeBoth',
+                                      command=fn_hingeBoth)
+        button_removehinge = ttk.Button(frame_hinges, text='hingeRemove',
+                                        command=fn_hingeRemove)
+
+        button_nodehinge.pack(side=tk.TOP, fill=tk.X)
+        button_starthinge.pack(side=tk.TOP, fill=tk.X)
+        button_endhinge.pack(side=tk.TOP, fill=tk.X)
+        button_bothnodes.pack(side=tk.TOP, fill=tk.X)
+        button_removehinge.pack(side=tk.TOP, fill=tk.X)
+
+    def fn_imperfections():
+        '''
+        Opens the 'Member imperfections' toplevel window.
+        '''
+        def fn_apply():
+            '''
+            Applies the current settings to be added to the structure.
+            '''
+            entry = [fn.entryGet(entry_prestr, 'float'),
+                     fn.entryGet(entry_curv, 'float')]
+            if 'error' in entry:
+                messagebox.showwarning('error', 'Enter valid data.')
+                return
+            else:
+                entry = [fn.unitConvert(Sta.units[10], 'cm', entry[0]),
+                         fn.unitConvert(Sta.units[10], 'cm', entry[1])]
+                Sta.currentApply = [entry[0], entry[1]]
+                Sta.clickType = 'imperfections'
+                Sta.statusbar.set('Select a bar to apply.')
+
+        def fn_close():
+            '''
+            Closes the window.
+            '''
+            Sta.clickType = 'select'
+            Sta.redraw()
+            Sta.statusbar.set('select an element.')
+            window_imperf.destroy()
+
+        # Main window
+        Sta.clickType = 'select'
+        Sta.redraw()
+
+        for child in frame_parent.winfo_children():
+            child.destroy()
+
+        mainX, mainY = window_main.winfo_x(), window_main.winfo_y()
+        window_imperf = tk.Toplevel(frame_parent, padx=15, pady=5)
+        #window_imperf.iconbitmap(resource_path('resources/000'))
+        window_imperf.title('ball joints')
+        window_imperf.geometry("+%d+%d" % (mainX + 550, mainY + 30))
+        window_imperf.resizable(False, False)
+        frame_imperf = ttk.LabelFrame(window_imperf, text='nodal releases')
+        window_imperf.protocol('WM_DELETE_WINDOW', fn_close)
+        window_imperf.attributes('-topmost', 'true')
+        window_imperf.focus_set()
+
+        ttk.Label(frame_imperf, text='Stretching (' +
+                  Sta.units[0] + '):').grid(row=1, column=1, sticky=tk.W)
+        ttk.Label(frame_imperf, text='initial arrow (' +
+                  Sta.units[0] + '):').grid(row=3, column=1, sticky=tk.W)
+
+        entry_prestr = ttk.Entry(frame_imperf, width=6, justify=tk.RIGHT)
+        entry_curv = ttk.Entry(frame_imperf, width=6, justify=tk.RIGHT)
+
+        entry_prestr.grid(row=1, column=3)
+        entry_curv.grid(row=3, column=3)
+
+        button_apply = ttk.Button(window_imperf, text='Apply',
+                                  command=fn_apply)
+        button_close = ttk.Button(window_imperf, text='Close',
+                                  command=fn_close)
+
+        frame_imperf.grid(row=0, column=0, columnspan=2)
+        button_apply.grid(row=1, column=0)
+        button_close.grid(row=1, column=1)
+
+        frame_imperf.grid_rowconfigure(0, minsize=10)
+        frame_imperf.grid_rowconfigure(2, minsize=10)
+        frame_imperf.grid_rowconfigure(4, minsize=10)
+        frame_imperf.grid_columnconfigure(0, minsize=10)
+        frame_imperf.grid_columnconfigure(2, minsize=15)
+        frame_imperf.grid_columnconfigure(4, minsize=10)
+
+    def fn_nodal():
+        '''
+        Opens the 'Nodal forces' toplevel window.
+        '''
+        def fn_apply():
+            '''
+            Applies the current settings to be added to the structure.
+            '''
+            entry = [fn.entryGet(entry_PX, 'float'),
+                     fn.entryGet(entry_PY, 'float'),
+                     fn.entryGet(entry_MZ, 'float'),
+                     fn.entryGet(entry_Pangle, 'float')]
+            if 'error' in entry:
+                messagebox.showwarning('error', 'Enter valid data.')
+                return
+            else:
+                entry = [fn.unitConvert(Sta.units[1], 'kN', entry[0]),
+                         fn.unitConvert(Sta.units[1], 'kN', entry[1]),
+                         fn.unitConvert(Sta.units[2], 'kN.cm', entry[2]),
+                         fn.unitConvert(Sta.units[12], 'rad', entry[3])]
+
+                Sta.currentApply = [entry[0], entry[1], entry[2], entry[3]]
+                Sta.clickType = 'nodal'
+                Sta.statusbar.set('Select a point to apply.')
+
+        def fn_close():
+            '''
+            Closes the window.
+            '''
+            Sta.clickType = 'select'
+            Sta.redraw()
+            Sta.statusbar.set('Select a point to apply.')
+            window_nodal.destroy()
+
+        # Main window
+        Sta.clickType = 'select'
+        Sta.redraw()
+
+        for child in frame_parent.winfo_children():
+            child.destroy()
+
+        mainX, mainY = window_main.winfo_x(), window_main.winfo_y()
+        window_nodal = tk.Toplevel(frame_parent, padx=15, pady=5)
+     #   window_nodal.iconbitmap(resource_path('resources/000'))
+        window_nodal.title('nodal forces')
+        window_nodal.geometry("+%d+%d" % (mainX + 550, mainY + 30))
+        window_nodal.resizable(False, False)
+        frame_nodal = ttk.LabelFrame(window_nodal, text='nodal forces')
+        window_nodal.protocol('WM_DELETE_WINDOW', fn_close)
+        window_nodal.attributes('-topmost', 'true')
+        window_nodal.focus_set()
+
+        ttk.Label(frame_nodal, text='Force X (' + Sta.units[1] +
+                  '):').grid(row=1, column=1, sticky=tk.W)
+        ttk.Label(frame_nodal, text='Force Y (' + Sta.units[1] +
+                  '):').grid(row=3, column=1, sticky=tk.W)
+        ttk.Label(frame_nodal, text='Momento Z (' + Sta.units[2] +
+                  '):').grid(row=5, column=1, sticky=tk.W)
+        ttk.Label(frame_nodal, text='Angle (' + Sta.units[12] +
+                  '):').grid(row=7, column=1, sticky=tk.W)
+
+        entry_PX = ttk.Entry(frame_nodal, width=6, justify=tk.RIGHT)
+        entry_PY = ttk.Entry(frame_nodal, width=6, justify=tk.RIGHT)
+        entry_MZ = ttk.Entry(frame_nodal, width=6, justify=tk.RIGHT)
+        entry_Pangle = ttk.Entry(frame_nodal, width=6, justify=tk.RIGHT)
+
+        entry_PX.grid(row=1, column=3)
+        entry_PY.grid(row=3, column=3)
+        entry_MZ.grid(row=5, column=3)
+        entry_Pangle.grid(row=7, column=3)
+
+        button_apply = ttk.Button(window_nodal, text='Apply',
+                                  command=fn_apply)
+        button_close = ttk.Button(window_nodal, text='Close',
+                                  command=fn_close)
+
+        frame_nodal.grid(row=0, column=0, columnspan=2)
+        button_apply.grid(row=1, column=0)
+        button_close.grid(row=1, column=1)
+
+        frame_nodal.grid_rowconfigure(0, minsize=10)
+        frame_nodal.grid_rowconfigure(2, minsize=10)
+        frame_nodal.grid_rowconfigure(4, minsize=10)
+        frame_nodal.grid_rowconfigure(6, minsize=10)
+        frame_nodal.grid_rowconfigure(8, minsize=10)
+        frame_nodal.grid_columnconfigure(0, minsize=10)
+        frame_nodal.grid_columnconfigure(2, minsize=15)
+        frame_nodal.grid_columnconfigure(4, minsize=10)
+
+    def fn_memberLoad():
+        '''
+        Opens the 'Distributed loads' toplevel window.
+        '''
+        def fn_apply():
+            '''
+            Applies the current settings to be added to the structure.
+            '''
+            entry = [fn.entryGet(entry_qx, 'float'),
+                     fn.entryGet(entry_qy, 'float'),
+                     fn.entryGet(var_qtype, 'int')]
+            if 'error' in entry:
+                messagebox.showwarning('error', 'Insira dados válidos.')
+                return
+            else:
+                entry = [fn.unitConvert(Sta.units[3], 'kN/cm', entry[0]),
+                         fn.unitConvert(Sta.units[3], 'kN/cm', entry[1]),
+                         entry[2]]
+                Sta.currentApply = [entry[0], entry[1], entry[2]]
+                Sta.clickType = 'memberLoad'
+                Sta.statusbar.set('Select a bar to apply.')
+
+        def fn_close():
+            '''
+            Closes the window.
+            '''
+            Sta.clickType = 'select'
+            Sta.redraw()
+            Sta.statusbar.set('select an element.')
+            window_memberLoads.destroy()
+
+        # Main window
+        Sta.clickType = 'select'
+        Sta.redraw()
+
+        for child in frame_parent.winfo_children():
+            child.destroy()
+
+        mainX, mainY = window_main.winfo_x(), window_main.winfo_y()
+        window_memberLoads = tk.Toplevel(frame_parent, padx=15, pady=5)
+       # window_memberLoads.iconbitmap(resource_path('resources/000'))
+        window_memberLoads.title('loads')
+        window_memberLoads.geometry("+%d+%d" % (mainX + 550, mainY + 30))
+        window_memberLoads.resizable(False, False)
+        frame_memberLoads = ttk.LabelFrame(window_memberLoads,
+                                           text='distributed loads')
+        window_memberLoads.protocol('WM_DELETE_WINDOW', fn_close)
+        window_memberLoads.attributes('-topmost', 'true')
+        window_memberLoads.focus_set()
+
+        ttk.Label(frame_memberLoads,
+                  text='directions:').grid(row=1, column=1, sticky=tk.W)
+        ttk.Label(frame_memberLoads, text='charge in x (' +
+                  Sta.units[3] + '):').grid(row=3, column=1, sticky=tk.W)
+        ttk.Label(frame_memberLoads, text='charge in y (' +
+                  Sta.units[3] + '):').grid(row=5, column=1, sticky=tk.W)
+
+        var_qtype = tk.IntVar(value=0)
+
+        ttk.Radiobutton(frame_memberLoads, text='Global', variable=var_qtype,
+                        value=0).grid(row=1, column=3, sticky=tk.W)
+        ttk.Radiobutton(frame_memberLoads, text='Local', variable=var_qtype,
+                        value=1).grid(row=1, column=5, sticky=tk.W)
+
+        entry_qx = ttk.Entry(frame_memberLoads, width=10, justify=tk.RIGHT)
+        entry_qy = ttk.Entry(frame_memberLoads, width=10, justify=tk.RIGHT)
+
+        entry_qx.grid(row=3, column=3, columnspan=3)
+        entry_qy.grid(row=5, column=3, columnspan=3)
+
+        button_apply = ttk.Button(window_memberLoads,
+                                  text='Apply', command=fn_apply)
+        button_close = ttk.Button(window_memberLoads,
+                                  text='Close', command=fn_close)
+
+        frame_memberLoads.grid(row=0, column=0, columnspan=2)
+        button_apply.grid(row=1, column=0)
+        button_close.grid(row=1, column=1)
+
+        frame_memberLoads.grid_rowconfigure(0, minsize=10)
+        frame_memberLoads.grid_rowconfigure(2, minsize=10)
+        frame_memberLoads.grid_rowconfigure(4, minsize=10)
+        frame_memberLoads.grid_rowconfigure(6, minsize=10)
+        frame_memberLoads.grid_columnconfigure(0, minsize=10)
+        frame_memberLoads.grid_columnconfigure(2, minsize=15)
+        frame_memberLoads.grid_columnconfigure(4, minsize=10)
+
+    def fn_thermal():
+        '''
+        Opens the 'Thermal loads' toplevel window.
+        '''
+        def fn_apply():
+            '''
+            Applies the current settings to be added to the structure.
+            '''
+            entry = [fn.entryGet(entry_Tsup, 'float'),
+                     fn.entryGet(entry_Tinf, 'float')]
+            if 'error' in entry:
+                messagebox.showwarning('error', 'Enter valid data.')
+                return
+            else:
+                entry = [fn.unitConvert(Sta.units[4], '°C', entry[0]),
+                         fn.unitConvert(Sta.units[4], '°C', entry[1])]
+                Sta.currentApply = [entry[0], entry[1]]
+                Sta.clickType = 'thermal'
+                Sta.statusbar.set('Select a bar to apply.')
+
+        def fn_close():
+            '''
+            Closes the window.
+            '''
+            Sta.clickType = 'select'
+            Sta.redraw()
+            Sta.statusbar.set('select an element.')
+            window_thermal.destroy()
+
+        # Main window
+        Sta.clickType = 'select'
+        Sta.redraw()
+
+        for child in frame_parent.winfo_children():
+            child.destroy()
+
+        mainX, mainY = window_main.winfo_x(), window_main.winfo_y()
+        window_thermal = tk.Toplevel(frame_parent, padx=15, pady=5)
+       # window_thermal.iconbitmap(resource_path('resources/000'))
+        window_thermal.title('thermal loads')
+        window_thermal.geometry("+%d+%d" % (mainX + 550, mainY + 30))
+        window_thermal.resizable(False, False)
+        frame_thermal = ttk.LabelFrame(window_thermal,
+                                       text='thermal loads')
+        window_thermal.protocol('WM_DELETE_WINDOW', fn_close)
+        window_thermal.attributes('-topmost', 'true')
+        window_thermal.focus_set()
+
+        ttk.Label(frame_thermal, text='Higher temperature (' +
+                  Sta.units[4] + '):').grid(row=1, column=1, sticky=tk.W)
+        ttk.Label(frame_thermal, text='Lower temperature (' +
+                  Sta.units[4] + '):').grid(row=3, column=1, sticky=tk.W)
+
+        entry_Tsup = ttk.Entry(frame_thermal, width=6, justify=tk.RIGHT)
+        entry_Tinf = ttk.Entry(frame_thermal, width=6, justify=tk.RIGHT)
+
+        entry_Tsup.grid(row=1, column=3)
+        entry_Tinf.grid(row=3, column=3)
+
+        button_apply = ttk.Button(window_thermal, text='Apply',
+                                  command=fn_apply)
+        button_close = ttk.Button(window_thermal, text='Close',
+                                  command=fn_close)
+
+        frame_thermal.grid(row=0, column=0, columnspan=2)
+        button_apply.grid(row=1, column=0)
+        button_close.grid(row=1, column=1)
+
+        frame_thermal.grid_rowconfigure(0, minsize=10)
+        frame_thermal.grid_rowconfigure(2, minsize=10)
+        frame_thermal.grid_rowconfigure(4, minsize=10)
+        frame_thermal.grid_columnconfigure(0, minsize=10)
+        frame_thermal.grid_columnconfigure(2, minsize=15)
+        frame_thermal.grid_columnconfigure(4, minsize=10)
+
+    def fn_loadcases():
+        '''
+        Opens the 'Manage loadcases' toplevel window.
+        '''
+        def fn_new():
+            '''
+            Opens the 'New loadcase' toplevel window.
+            '''
+            def fn_apply():
+                '''
+                Creates a new loadcase.
+                '''
+                name = entry_name.get()
+                if not name:
+                    messagebox.showwarning('error', 'Enter a valid name.')
+                    window_newCase.lift()
+                    return
+                elif name in Sta.loadcasesList:
+                    messagebox.showwarning('error',
+                                           'There is already a case with that name.')
+                    window_newCase.lift()
+                    return
+                else:
+                    Sta.loadcasesList.append(name)
+                    caseList.insert('', 'end', name, text=name)
+
+                    for node in Sta.nodesList:
+                        node.newCase()
+                    for member in Sta.membersList:
+                        member.newCase()
+                    for combo in Sta.comboFactors:
+                        combo.append(0)
+                fn_casesUpdate()
+                window_newCase.destroy()
+
+            window_newCase = tk.Toplevel(frame_parent, padx=5, pady=5)
+           # window_newCase.iconbitmap(resource_path('resources/000'))
+            window_newCase.title('new case')
+            window_newCase.resizable(False, False)
+            window_newCase.grab_set()
+            frame_newCase = ttk.LabelFrame(window_newCase, text='new case')
+            ttk.Label(frame_newCase,
+                      text='case name:').grid(row=1, column=1, sticky=tk.W)
+            entry_name = ttk.Entry(frame_newCase, width=10)
+            entry_name.grid(row=1, column=3)
+
+            entry_name.focus_set()
+
+            button_apply = ttk.Button(window_newCase,
+                                      text='Ok', command=fn_apply)
+            button_close = ttk.Button(window_newCase, text='Cancel',
+                                      command=lambda: window_newCase.destroy())
+
+            frame_newCase.grid_rowconfigure(0, minsize=10)
+            frame_newCase.grid_rowconfigure(2, minsize=10)
+            frame_newCase.grid_columnconfigure(0, minsize=10)
+            frame_newCase.grid_columnconfigure(2, minsize=15)
+            frame_newCase.grid_columnconfigure(4, minsize=10)
+
+            frame_newCase.pack(side=tk.TOP)
+            button_apply.pack(side=tk.LEFT)
+            button_close.pack(side=tk.LEFT)
+
+        def fn_edit():
+            '''
+            Opens the 'Edit name' toplevel window.
+            '''
+            def fn_apply():
+                '''
+                Changes a loadcase's name.
+                '''
+                name = entry_name.get()
+                if not name:
+                    messagebox.showwarning('error', 'Enter a valid name.')
+                    window_editCase.lift()
+                    return
+                elif name in Sta.loadcasesList:
+                    messagebox.showwarning('error',
+                                           'There is already a case with that name.')
+                    window_editCase.lift()
+                    return
+                else:
+                    for case in Sta.loadcasesList:
+                        if case == oldname:
+                            case = name
+                            itemsList = caseList.get_children()
+                            item = next((itemsList[i] for i in
+                                        range(len(itemsList)) if
+                                        itemsList[i] == oldname), None)
+                            caseList.delete(item)
+                            i = itemsList.index(item)
+                            caseList.insert('', i, 'text', text=name)
+                fn_casesUpdate()
+                window_editCase.destroy()
+
+            curItem = caseList.item(caseList.focus())
+            oldname = curItem['text']
+            if not oldname:
+                messagebox.showwarning('error',
+                                       'Select a load case ' +
+                                       'to rename.')
+                window_loadcases.lift()
+                return
+            window_editCase = tk.Toplevel(frame_parent, padx=5, pady=5)
+           # window_editCase.iconbitmap(resource_path('resources/000'))
+            window_editCase.title('rename case')
+            window_editCase.resizable(False, False)
+            window_editCase.grab_set()
+            frame_editCase = ttk.LabelFrame(window_editCase,
+                                            text='rename case')
+            ttk.Label(frame_editCase,
+                      text='New name:').grid(row=1, column=1, sticky=tk.W)
+            entry_name = ttk.Entry(frame_editCase, width=10)
+            entry_name.grid(row=1, column=3)
+
+            entry_name.focus_set()
+
+            window_editCase.focus()
+
+            button_apply = ttk.Button(window_editCase, text='Ok',
+                                      command=fn_apply)
+            button_close = ttk.Button(window_editCase, text='cancel',
+                                      command=window_editCase.destroy)
+
+            frame_editCase.grid_rowconfigure(0, minsize=10)
+            frame_editCase.grid_rowconfigure(2, minsize=10)
+            frame_editCase.grid_columnconfigure(0, minsize=10)
+            frame_editCase.grid_columnconfigure(2, minsize=15)
+            frame_editCase.grid_columnconfigure(4, minsize=10)
+
+            frame_editCase.pack(side=tk.TOP)
+            button_apply.pack(side=tk.LEFT)
+            button_close.pack(side=tk.LEFT)
+
+        def fn_delete():
+            '''
+            Deletes the current loadcase.
+            '''
+
+            curItem = caseList.item(caseList.focus())
+            selected = curItem['text']
+
+            if len(Sta.loadcasesList) < 2:
+                messagebox.showwarning('error', 'You need at least one ' +
+                                       'load case on structure.')
+            elif not selected:
+                messagebox.showwarning('error', 'Select a load case ' +
+                                       'to turn off.')
+            else:
+                result = messagebox.askquestion("Delete",
+                                                "Are you sure you want " +
+                                                "delete case?",
+                                                icon='warning')
+                if result == 'yes':
+                    for case in Sta.loadcasesList:
+                        if case == selected:
+                            i = Sta.loadcasesList.index(case)
+                            Sta.loadcasesList.remove(case)
+                            itemsList = caseList.get_children()
+                            item = next((itemsList[i] for i in
+                                         range(len(itemsList)) if
+                                         itemsList[i] == selected), None)
+
+                            caseList.delete(item)
+
+                            for node in Sta.nodesList:
+                                node.delCase(i)
+                            for member in Sta.membersList:
+                                member.delCase(i)
+                            for combo in Sta.comboFactors:
+                                combo.pop(i)
+            fn_casesUpdate()
+            window_loadcases.lift()
+
+        Sta.clickType = 'select'
+        Sta.redraw()
+
+        for child in frame_parent.winfo_children():
+            child.destroy()
+
+        mainX, mainY = window_main.winfo_x(), window_main.winfo_y()
+        window_loadcases = tk.Toplevel(frame_parent, padx=15, pady=5)
+     #   window_loadcases.iconbitmap(resource_path('resources/000'))
+        window_loadcases.title('load cases')
+        window_loadcases.geometry("+%d+%d" % (mainX + 550, mainY + 30))
+        window_loadcases.resizable(False, False)
+        window_loadcases.grab_set()
+        frame_loadcases = ttk.LabelFrame(window_loadcases,
+                                         text='load cases')
+        frame_loadcases.pack()
+        window_loadcases.focus_set()
+
+        caseList = ttk.Treeview(frame_loadcases)
+        caseList.heading('#0', text='case name:')
+
+        for loadcase in Sta.loadcasesList:
+            caseList.insert('', 'end', loadcase, text=loadcase)
+        caseList.grid(row=0, column=0, columnspan=3, sticky='nsew')
+
+        button_new = ttk.Button(frame_loadcases, text='New', command=fn_new)
+        button_rename = ttk.Button(frame_loadcases, text='Edit',
+                                   command=fn_edit)
+        button_delete = ttk.Button(frame_loadcases, text='delete',
+                                   command=fn_delete)
+
+        button_new.grid(row=1, column=0)
+        button_rename.grid(row=1, column=1)
+        button_delete.grid(row=1, column=2)
+
+    def fn_COMBINATIONS():
+        '''
+        Opens the 'Manage COMBINATIONS' toplevel window.
+        '''
+        def fn_new():
+            '''
+            Opens the 'New combination' toplevel window.
+            '''
+            def fn_apply():
+                '''
+                Creates a new combination.
+                '''
+                name = entry_name.get()
+                if not name:
+                    messagebox.showwarning('error', 'Enter a valid name.')
+                    window_newCombo.lift()
+                    return
+                elif name in Sta.COMBINATIONSList:
+                    messagebox.showwarning('error', 'there is already one ' +
+                                           'combination with that name.')
+                    window_newCombo.lift()
+                    return
+                else:
+                    Sta.COMBINATIONSList.append(name)
+                    factors = [0]*len(Sta.loadcasesList)
+                    Sta.comboFactors.append(factors)
+                    comboList.insert('', 'end', name, text=name)
+                window_newCombo.destroy()
+
+            window_newCombo = tk.Toplevel(frame_parent, padx=5, pady=5)
+           # window_newCombo.iconbitmap(resource_path('resources/000'))
+            window_newCombo.title('new combination')
+            window_newCombo.resizable(False, False)
+            window_newCombo.grab_set()
+            frame_newCombo = ttk.LabelFrame(window_newCombo,
+                                            text='New combination')
+            ttk.Label(frame_newCombo,
+                      text='combination name:').grid(row=1,
+                                                       column=1, sticky=tk.W)
+            entry_name = ttk.Entry(frame_newCombo, width=10)
+            entry_name.grid(row=1, column=3)
+
+            entry_name.focus_set()
+
+            button_apply = ttk.Button(window_newCombo,
+                                      text='Ok', command=fn_apply)
+            button_close = ttk.Button(window_newCombo, text='Cancel',
+                                      command=window_newCombo.destroy)
+
+            frame_newCombo.grid_rowconfigure(0, minsize=10)
+            frame_newCombo.grid_rowconfigure(2, minsize=10)
+            frame_newCombo.grid_columnconfigure(0, minsize=10)
+            frame_newCombo.grid_columnconfigure(2, minsize=15)
+            frame_newCombo.grid_columnconfigure(4, minsize=10)
+
+            frame_newCombo.pack(side=tk.TOP)
+            button_apply.pack(side=tk.LEFT)
+            button_close.pack(side=tk.LEFT)
+
+        def fn_edit():
+            '''
+            Opens the 'Edit name' toplevel window.
+            '''
+            def fn_apply():
+                '''
+                Changes a loadcase's name.
+                '''
+                name = entry_name.get()
+                if not name:
+                    messagebox.showwarning('error', 'Please enter a valid name.')
+                    window_editCombo.lift()
+                    return
+                elif name in Sta.COMBINATIONSList:
+                    messagebox.showwarning('error', 'there is already one' +
+                                           'combination with that name.')
+                    window_editCombo.lift()
+                    return
+                else:
+                    for case in Sta.COMBINATIONSList:
+                        if case == oldname:
+                            itemsList = comboList.get_children()
+                            item = next((itemsList[i] for i in
+                                         range(len(itemsList)) if
+                                         itemsList[i] == oldname), None)
+                            comboList.delete(item)
+                            i = itemsList.index(item)
+                            Sta.COMBINATIONSList[i] = name
+                            comboList.insert('', i, 'text', text=name)
+                window_editCombo.destroy()
+
+            curItem = comboList.item(comboList.focus())
+            oldname = curItem['text']
+
+            if not oldname:
+                messagebox.showwarning('error', 'Select a combination ' +
+                                       'to rename.')
+                window_COMBINATIONS.lift()
+                return
+
+            window_editCombo = tk.Toplevel(frame_parent, padx=5, pady=5)
+           # window_editCombo.iconbitmap(resource_path('resources/000'))
+            window_editCombo.title('rename case')
+            window_editCombo.resizable(False, False)
+            window_editCombo.grab_set()
+            frame_editCombo = ttk.LabelFrame(window_editCombo,
+                                             text='rename case')
+            ttk.Label(frame_editCombo,
+                      text='New Name:').grid(row=1, column=1, sticky=tk.W)
+            entry_name = ttk.Entry(frame_editCombo, width=10)
+            entry_name.grid(row=1, column=3)
+
+            entry_name.focus_set()
+
+            window_editCombo.focus()
+
+            button_apply = ttk.Button(window_editCombo,
+                                      text='Ok', command=fn_apply)
+            button_close = ttk.Button(window_editCombo, text='Cancel',
+                                      command=window_editCombo.destroy)
+
+            frame_editCombo.grid_rowconfigure(0, minsize=10)
+            frame_editCombo.grid_rowconfigure(2, minsize=10)
+            frame_editCombo.grid_columnconfigure(0, minsize=10)
+            frame_editCombo.grid_columnconfigure(2, minsize=15)
+            frame_editCombo.grid_columnconfigure(4, minsize=10)
+
+            frame_editCombo.pack(side=tk.TOP)
+            button_apply.pack(side=tk.LEFT)
+            button_close.pack(side=tk.LEFT)
+
+        def fn_delete():
+            '''
+            Deletes the current loadcase.
+            '''
+            curItem = comboList.item(comboList.focus())
+            selected = curItem['text']
+
+            if not selected:
+                messagebox.showwarning('error', 'Select one ' +
+                                       'combination to erase.')
+                return
+            else:
+                result = messagebox.askquestion("Delete",
+                                                "Are you sure you want" +
+                                                "delete combination?",
+                                                icon='warning')
+                if result == 'yes':
+                    for combo in Sta.COMBINATIONSList:
+                        if combo == selected:
+                            i = Sta.COMBINATIONSList.index(combo)
+                            Sta.COMBINATIONSList.remove(combo)
+                            Sta.comboFactors.pop(i)
+
+                            itemsList = comboList.get_children()
+                            item = next((itemsList[i] for i in
+                                        range(len(itemsList)) if
+                                        itemsList[i] == selected), None)
+                            comboList.delete(item)
+
+            window_COMBINATIONS.lift()
+
+        def fn_factors():
+            '''
+            Opens the 'Manage combination factors' window.
+            '''
+            def fn_save():
+                '''
+                Saves the changes made to the combination factors.
+                '''
+                factors = []
+                for combo in range(len(Sta.COMBINATIONSList)):
+                    factors.append([])
+                    for case in range(len(Sta.loadcasesList)):
+                        entry = fn.entryGet(entries[combo][case], 'float')
+                        if entry == 'error':
+                            messagebox.showwarning('error',
+                                                   'Enter valid factors.')
+                            window_factors.lift()
+                            return
+                        else:
+                            factors[combo].append(entry)
+
+                for combo in range(len(Sta.COMBINATIONSList)):
+                    for case in range(len(Sta.loadcasesList)):
+                        Sta.comboFactors[combo][case] = factors[combo][case]
+
+            def fn_restore():
+                '''
+                Scraps the changes made to the combination factors.
+                '''
+                result = messagebox.askquestion("To restore",
+                                                "you sure " +
+                                                "want to restore the " +
+                                                "combination factors?",
+                                                icon='warning')
+                if result == 'yes':
+                    for combo in range(len(Sta.COMBINATIONSList)):
+                        for case in range(len(Sta.loadcasesList)):
+                            a = str(Sta.comboFactors[combo][case])
+                            entries[combo][case].delete(0, tk.END)
+                            entries[combo][case].insert(0, a)
+                else:
+                    return
+                window_factors.lift()
+
+            def fn_clear():
+                '''
+                Clears the whole spreadsheet.
+                '''
+                result = messagebox.askquestion("Clean",
+                                                "you sure" +
+                                                "want to clear all " +
+                                                "the combination factors?",
+                                                icon='warning')
+                if result == 'yes':
+                    for combo in range(len(Sta.COMBINATIONSList)):
+                        for case in range(len(Sta.loadcasesList)):
+                            entries[combo][case].delete(0, tk.END)
+
+                else:
+                    return
+                window_factors.lift()
+
+            if len(Sta.COMBINATIONSList) == 0:
+                messagebox.showwarning('no combination',
+                                       'There are no combinations available!')
+                window_COMBINATIONS.lift()
+                return
+
+            mainX, mainY = window_main.winfo_x(), window_main.winfo_y()
+            window_factors = tk.Toplevel(frame_parent, padx=15, pady=5)
+           # window_factors.iconbitmap(resource_path('resources/000'))
+            window_factors.title('stock combinations')
+            window_factors.geometry("+%d+%d" % (mainX + 300, mainY + 30))
+            window_factors.minsize(250, 350)
+            window_factors.resizable(False, False)
+            window_factors.grab_set()
+
+            frame_container = tk.Frame(window_factors)
+            frame_container.grid(row=0, column=0,
+                                 columnspan=3, rowspan=2, sticky='nsew')
+
+            frame_factors = Scrollable(frame_container)
+
+            entries = [[] for i in range(len(Sta.COMBINATIONSList))]
+            for i in range(len(Sta.loadcasesList)):
+                ttk.Label(frame_factors.frame,
+                          text=Sta.loadcasesList[i]).grid(row=0, column=i+1)
+
+            for i in range(len(Sta.COMBINATIONSList)):
+                ttk.Label(frame_factors.frame,
+                          text=Sta.COMBINATIONSList[i]).grid(row=i+1, column=0,
+                                                             sticky=tk.W)
+
+                for j in range(len(Sta.loadcasesList)):
+                    length = max(len(Sta.loadcasesList[j])+5, 20)
+                    entry = ttk.Entry(frame_factors.frame, width=length)
+                    entries[i].append(entry)
+                    entries[i][j].grid(row=i+1, column=j+1)
+                    entries[i][j].insert(0, str(Sta.comboFactors[i][j]))
+
+            window_factors.grid_columnconfigure(0, weight=1)
+            window_factors.grid_rowconfigure(0, weight=1)
+
+            button_save = ttk.Button(window_factors,
+                                     text='To save', command=fn_save)
+            button_restore = ttk.Button(window_factors,
+                                        text='To restore', command=fn_restore)
+            button_clear = ttk.Button(window_factors,
+                                      text='Clean', command=fn_clear)
+
+            button_save.grid(row=2, column=0, sticky='we')
+            button_restore.grid(row=2, column=1, sticky='we')
+            button_clear.grid(row=2, column=2, sticky='we')
+
+            frame_factors.update()
+
+        for child in frame_parent.winfo_children():
+            child.destroy()
+        Sta.clickType = 'select'
+        Sta.redraw()
+
+        mainX, mainY = window_main.winfo_x(), window_main.winfo_y()
+        window_COMBINATIONS = tk.Toplevel(frame_parent, padx=15, pady=5)
+      #  window_COMBINATIONS.iconbitmap(resource_path('resources/000'))
+        window_COMBINATIONS.title('stock combinations')
+        window_COMBINATIONS.geometry("+%d+%d" % (mainX + 550, mainY + 30))
+        window_COMBINATIONS.resizable(False, False)
+        window_COMBINATIONS.grab_set()
+
+        frame_COMBINATIONS = ttk.LabelFrame(window_COMBINATIONS,
+                                            text='combinations')
+        frame_COMBINATIONS.pack(fill=tk.BOTH)
+        window_COMBINATIONS.focus_set()
+
+        comboList = ttk.Treeview(frame_COMBINATIONS)
+        comboList.heading('#0', text='Name')
+
+        for combination in Sta.COMBINATIONSList:
+            comboList.insert('', 'end', combination, text=combination)
+        comboList.grid(row=0, column=0, columnspan=4, sticky='nsew')
+
+        button_new = ttk.Button(frame_COMBINATIONS,
+                                text='new combination', command=fn_new)
+        button_rename = ttk.Button(frame_COMBINATIONS,
+                                   text='rename', command=fn_edit)
+        button_delete = ttk.Button(frame_COMBINATIONS,
+                                   text='Delete', command=fn_delete)
+        button_factors = ttk.Button(frame_COMBINATIONS,
+                                    btext='load factors',
+                                    command=fn_factors)
+
+        button_new.grid(row=1, column=0)
+        button_rename.grid(row=1, column=1)
+        button_delete.grid(row=1, column=2)
+        button_factors.grid(row=1, column=3)
+
+    def fn_settings():
+        '''
+        Opens the settings window.
+        '''
+        def fn_apply():
+            '''
+            Applies the current settings.
+            '''
+            entries = [fn.entryGet(entry_maxiter, 'int'),
+                       fn.entryGet(entry_maxerror, 'float'),
+                       fn.entryGet(entry_hx, 'float'),
+                       fn.entryGet(entry_hy, 'float')]
+
+            for entry in entries:
+                if entry == 'error' or entry < 0:
+                    messagebox.showwarning('error', 'Enter valid values.')
+                    window_settings.lift()
+                    return
+            else:
+                for i in range(15):
+                    Sta.units[i] = Sta.unitVars[i].get()
+                Sta.maxiter, Sta.maxerror = entries[0], entries[1]
+                Sta.hx = fn.unitConvert(Sta.units[0], 'cm', entries[2])
+                Sta.hy = fn.unitConvert(Sta.units[0], 'cm', entries[3])
+
+                if Sta.currentColor.get() == 'clear':
+                    Sta.colorScheme = Sta.lightColor
+                else:
+                    Sta.colorScheme = Sta.darkColor
+
+                Sta.canvas.config(bg=Sta.colorScheme[0])
+
+                Sta.whatToDraw()
+                window_settings.destroy()
+
+        def fn_close():
+            '''
+            Closes the window.
+            '''
+            Sta.clickType = 'select'
+            Sta.redraw()
+            Sta.statusbar.set('select an element.')
+            window_settings.destroy()
+
+        for child in frame_parent.winfo_children():
+            child.destroy()
+
+        mainX, mainY = window_main.winfo_x(), window_main.winfo_y()
+        window_settings = tk.Toplevel(frame_parent, padx=15, pady=5)
+       # window_settings.iconbitmap(resource_path('resources/000'))
+        window_settings.title('settings')
+        window_settings.geometry("+%d+%d" % (mainX + 550, mainY + 30))
+        window_settings.resizable(False, False)
+        window_settings.grab_set()
+        window_settings.protocol('WM_DELETE_WINDOW', fn_close)
+
+        frame_analysis = ttk.LabelFrame(window_settings,
+                                        text='Analysis parameters')
+        frame_units = ttk.LabelFrame(window_settings,
+                                     text='measurement units')
+        frame_misc = ttk.LabelFrame(window_settings,
+                                    text='Other parameters')
+
+        frame_analysis.grid(row=0, column=0, columnspan=2, sticky='nsew')
+        frame_units.grid(row=1, column=0, columnspan=2, sticky='nsew')
+        frame_misc.grid(row=2, column=0, columnspan=2, sticky='nsew')
+        window_settings.focus_set()
+
+        ttk.Label(frame_analysis,
+                  text='Type of analysis::').grid(row=1, column=1, sticky=tk.W)
+        ttk.Label(frame_analysis,
+                  text='Maximum iterations:').grid(row=3, column=1,
+                                                    sticky=tk.W)
+        ttk.Label(frame_analysis,
+                  text='maximum error:').grid(row=3, column=7, sticky=tk.W)
+        ttk.Label(frame_analysis,
+                  text='maximums/minimums:').grid(row=5, column=1, sticky=tk.W)
+
+        ttk.Radiobutton(frame_analysis, text='1st order analysis',
+                        variable=Sta.analysisType,
+                        value=0).grid(row=1, column=3,
+                                      columnspan=3, sticky=tk.W)
+
+        ttk.Radiobutton(frame_analysis, text='2nd order analysis',
+                        variable=Sta.analysisType,
+                        value=1).grid(row=1, column=7,
+                                      columnspan=3, sticky=tk.W)
+
+        ttk.Radiobutton(frame_analysis, text='cases and combinations',
+                        variable=Sta.maxType,
+                        value=0).grid(row=5, column=3,
+                                      columnspan=3, sticky=tk.W)
+
+        ttk.Radiobutton(frame_analysis, text='only cases',
+                        variable=Sta.maxType, value=1).grid(row=7, column=3,
+                                                            columnspan=3,
+                                                            sticky=tk.W)
+
+        ttk.Radiobutton(frame_analysis, text='combinations only',
+                        variable=Sta.maxType, value=2).grid(row=9, column=3,
+                                                            columnspan=3,
+                                                            sticky=tk.W)
+
+        entry_maxiter = ttk.Entry(frame_analysis, width=6, justify=tk.RIGHT)
+        entry_maxerror = ttk.Entry(frame_analysis, width=6, justify=tk.RIGHT)
+
+        entry_maxiter.insert(0, str(Sta.maxiter))
+        entry_maxerror.insert(0, str(Sta.maxerror))
+        entry_maxiter.grid(row=3, column=3, sticky=tk.W)
+        entry_maxerror.grid(row=3, column=9, sticky=tk.W)
+
+        unitNames = ['Length:', 'Force:', 'Moment:', 'Loading:',
+                     'Temperature:', 'Elasticity:', 'Coef. thermal:',
+                     'Height:', 'Área:', 'Inertia:', 'Displacement:',
+                     'Rotation:', 'Angle:', 'K spring linear:',
+                     'torsion spring:']
+
+        units = [['mm', 'cm', 'dm', 'm', 'in', 'ft'],
+                 ['N', 'kN', 'kgf', 'tf', 'lbf', 'kip'],
+                 ['N.mm', 'N.cm', 'N.dm', 'N.m', 'kN.mm', 'kN.cm', 'kN.dm',
+                  'kN.m', 'kgf.mm', 'kgf.cm', 'kgf.dm', 'kgf.m', 'tf.mm',
+                  'tf.cm', 'tf.dm', 'tf.m', 'lbf.in', 'lbf.ft', 'kip.in',
+                  'kip.ft'],
+                 ['N/mm', 'N/cm', 'N/dm', 'N/m', 'kN/mm', 'kN/cm', 'kN/dm',
+                  'kN/m', 'kgf/mm', 'kgf/cm', 'kgf/dm', 'kgf/m', 'tf/mm',
+                  'tf/cm', 'tf/dm', 'tf/m', 'lbf/in', 'lbf/ft', 'kip/in',
+                  'kip/ft'],
+                 ['°C', '°F', 'K'],
+                 ['kPa', 'MPa', 'GPa', 'kgf/cm²', 'kgf/mm²', 'kgf/m²',
+                  'tf/mm²', 'tf/cm²', 'tf/m²', 'kip/ft²', 'lbf/ft²',
+                  'ksi', 'psi'],
+                 ['1/°C', '1/°F', '1/K'],
+                 ['mm', 'cm', 'dm', 'm', 'in', 'ft'],
+                 ['mm²', 'cm²', 'dm²', 'm²', 'in²', 'ft²'],
+                 ['mm4', 'cm4', 'dm4', 'm4', 'in4', 'ft4'],
+                 ['mm', 'cm', 'dm', 'm', 'in', 'ft'],
+                 ['°', 'rad'],
+                 ['°', 'rad'],
+                 ['N/mm', 'N/cm', 'N/dm', 'N/m', 'kN/mm', 'kN/cm', 'kN/dm',
+                  'kN/m', 'kgf/mm', 'kgf/cm', 'kgf/dm', 'kgf/m', 'tf/mm',
+                  'tf/cm', 'tf/dm', 'tf/m', 'lbf/in', 'lbf/ft', 'kip/in',
+                  'kip/ft'],
+                 ['N/rad', 'kN/rad', 'kgf/rad', 'tf/rad', 'lbf/rad',
+                  'kip/rad', 'N/°', 'kN/°', 'kgf/°', 'tf/°', 'lbf/°',
+                  'kip/°']]
+
+        for i in range(8):
+            ttk.Label(frame_units,
+                      text=unitNames[i]).grid(row=1+2*i, column=1,
+                                              sticky=tk.W)
+            combobox1 = ttk.Combobox(frame_units, width=11,
+                                     textvariable=Sta.unitVars[i])
+            combobox1['values'] = tuple(units[i])
+            combobox1.delete(0, tk.END)
+            combobox1.insert(0, Sta.units[i])
+            combobox1.config(state='readonly')
+            combobox1.grid(row=1+2*i, column=3, sticky=tk.W)
+
+        for i in range(7):
+            ttk.Label(frame_units,
+                      text=unitNames[i+8]).grid(row=1+2*i,
+                                                column=5, sticky=tk.W)
+            combobox2 = ttk.Combobox(frame_units, width=11,
+                                     textvariable=Sta.unitVars[i+8])
+            combobox2['values'] = tuple(units[i+8])
+            combobox2.delete(0, tk.END)
+            combobox2.insert(0, Sta.units[i+8])
+            combobox2.config(state='readonly')
+            combobox2.grid(row=1+2*i, column=7, sticky=tk.W)
+
+        ttk.Label(frame_misc, text='Space. from the grid X(' +
+                  Sta.units[0] + '):').grid(row=1, column=1, sticky=tk.W)
+        ttk.Label(frame_misc, text='Space. from the grid Y (' +
+                  Sta.units[0] + '):').grid(row=3, column=1, sticky=tk.W)
+
+
+        entry_hx = ttk.Entry(frame_misc, width=6, justify=tk.RIGHT)
+        entry_hy = ttk.Entry(frame_misc, width=6, justify=tk.RIGHT)
+        entry_hx.insert(0, str(Sta.hx))
+        entry_hy.insert(0, str(Sta.hy))
+
+        entry_hx.grid(row=1, column=3, sticky=tk.W)
+        entry_hy.grid(row=3, column=3, sticky=tk.W)
+
+        button_ok = ttk.Button(window_settings, text='Ok', command=fn_apply)
+        button_cancel = ttk.Button(window_settings, text='Close',
+                                   command=fn_close)
+
+        button_ok.grid(row=4, column=0)
+        button_cancel.grid(row=4, column=1)
+
+    def fn_runStructure():
+        '''
+        Runs the analysis and displays the results.
+        '''
+        def fn_resultsShow(event):
+            '''
+            Decides which diagram to show.
+            '''
+            Sta.resultClick = [-1, 0]
+            r = var_results.get()
+            x = resultsSlider.get()/8
+
+            for i in range(4):
+                k = np.absolute(Sta.resultsConstant[i])
+                Sta.resultsScale[i] = (0.1*k*(1.203125e-02*x**3 +
+                                       -9.437500e-01*x**2 + 1.875000e+01*x))
+            if r == 0:
+                Sta.clickType = 'displace'
+            elif r == 1:
+                Sta.clickType = 'axial'
+            elif r == 2:
+                Sta.clickType = 'shear'
+            elif r == 3:
+                Sta.clickType = 'bending'
+
+            elif r == 4:
+                Sta.clickType = 'maxAxial'
+            elif r == 5:
+                Sta.clickType = 'maxShear'
+            elif r == 6:
+                Sta.clickType = 'maxBending'
+
+            Sta.drawResults()
+
+        def fn_close():
+            '''
+            Closes the window.
+            '''
+            Sta.clickType = 'select'
+            Sta.redraw()
+            Sta.statusbar.set('select an element.')
+            window_results.destroy()
+            caseList.config(state='readonly')
+
+        def fn_changeCase(event):
+            '''
+            Changes the current loadcase/combination.
+            '''
+            i = cases.index(currentCase.get())
+            if i < len(Sta.loadcasesList):
+                Sta.currentLoadcase = i
+                Sta.currentCombination = -1
+            else:
+                Sta.currentLoadcase = -1
+                Sta.currentCombination = i - len(Sta.loadcasesList)
+            Sta.whatToDraw()
+
+        if Sta.analysisType.get() == 0:
+            Sta.results = run.linear(Sta)
+        elif Sta.analysisType.get() == 1:
+            Sta.results = run.galambos(Sta)
+
+        if True:
+            cases = []
+            for case in Sta.loadcasesList:
+                cases.append('Case: ' + case)
+            for combo in Sta.COMBINATIONSList:
+                cases.append('COMB.: ' + combo)
+
+            for child in frame_parent.winfo_children():
+                child.destroy()
+
+            if Sta.analysisType.get() == 0:
+                Sta.displacements = run.dispLinear(Sta)
+                Sta.forces = run.internalForces(Sta, 0)
+                run.maxmin(Sta)
+
+            elif Sta.analysisType.get() == 1:
+                Sta.displacements = run.dispNonlinear(Sta)
+                Sta.forces = run.internalForces(Sta, 1)
+                run.maxmin(Sta)
+
+            mainX, mainY = window_main.winfo_x(), window_main.winfo_y()
+            window_results = tk.Toplevel(frame_parent, padx=15, pady=5)
+            #window_results.iconbitmap(resource_path('resources/000'))
+            window_results.title('Results')
+            window_results.geometry("+%d+%d" % (mainX + 550, mainY + 30))
+            window_results.resizable(False, False)
+            window_results.attributes('-topmost', True)
+            frame_results = ttk.LabelFrame(window_results, text='Results')
+            window_results.protocol('WM_DELETE_WINDOW', fn_close)
+            window_results.focus_set()
+
+            frame_results.pack()
+
+            var_results = tk.IntVar()
+            ttk.Radiobutton(frame_results, text='deformed structure',
+                            variable=var_results, value=0,
+                            command=lambda: fn_resultsShow(0)).grid(row=1,
+                                                                    column=1,
+                                                                    columnspan=3,
+                                                                    sticky=tk.W)
+
+            ttk.Radiobutton(frame_results, text='Axial force diagram',
+                            variable=var_results, value=1,
+                            command=lambda: fn_resultsShow(0)).grid(row=3,
+                                                                    column=1,
+                                                                    columnspan=3,
+                                                                    sticky=tk.W)
+
+            ttk.Radiobutton(frame_results, text='Shear force diagram',
+                            variable=var_results, value=2,
+                            command=lambda: fn_resultsShow(0)).grid(row=5,
+                                                                    column=1,
+                                                                    columnspan=3,
+                                                                    sticky=tk.W)
+
+            ttk.Radiobutton(frame_results, text='Bending moment diagram',
+                            variable=var_results, value=3,
+                            command=lambda: fn_resultsShow(0)).grid(row=7,
+                                                                    column=1,
+                                                                    columnspan=3,
+                                                                    sticky=tk.W)
+
+            ttk.Radiobutton(frame_results, text='Maximum/minimum axial forces',
+                            variable=var_results, value=4,
+                            command=lambda: fn_resultsShow(0)).grid(row=9, column=1,
+                                                                    columnspan=3,
+                                                                    sticky=tk.W)
+
+            ttk.Radiobutton(frame_results, text='Maximum/minimum shear forces',
+                            variable=var_results, value=5,
+                            command=lambda: fn_resultsShow(0)).grid(row=11, column=1,
+                                                                    columnspan=3, sticky=tk.W)
+
+            ttk.Radiobutton(frame_results, text='Maximum/minimum bending moments',
+                            variable=var_results, value=6,
+                            command=lambda: fn_resultsShow(0)).grid(row=13, column=1,
+                                                                    columnspan=3, sticky=tk.W)
+
+            resultsSlider = ttk.Scale(frame_results, from_=0, to=80,
+                                      command=fn_resultsShow)
+            resultsSlider.set(20)
+
+            caseList.config(state=tk.DISABLED)
+            Sta.currentLoadcase = 0
+            Sta.currentCombination = -1
+            currentCase = tk.StringVar()
+            resultList = ttk.Combobox(frame_results, textvariable=currentCase)
+            resultList['values'] = tuple(cases)
+            resultList.insert(0, cases[0])
+            resultList.config(state='readonly')
+
+            resultList.bind('<<ComboboxSelected>>', fn_changeCase)
+            reactionCheck = ttk.Checkbutton(frame_results,
+                                            text="View support reactions",
+                                            variable=Sta.showReactions,
+                                            command=Sta.whatToDraw)
+
+            ttk.Label(frame_results, text='Scale:').grid(row=15, column=1,
+                                                          sticky=tk.W)
+            ttk.Label(frame_results, text='Case/Comb:').grid(row=17, column=1,
+                                                              sticky=tk.W)
+
+            resultsSlider.grid(row=15, column=3)
+            resultList.grid(row=17, column=3)
+            reactionCheck.grid(row=19, column=1, columnspan=3, sticky=tk.W)
+
+            Sta.clickType = 'displace'
+            Sta.statusbar.set('Click a point on the structure ' +
+                              '.')
+            Sta.drawResults()
+
+    def fn_casesUpdate():
+        '''
+        Updates the loadcases combobox when any loadcase is
+        added, removed or renamed.
+        '''
+        caseListValues = []
+        for case in Sta.loadcasesList:
+            caseListValues.append(case)
+
+        caseList['values'] = tuple(caseListValues)
+        if Sta.currentLoadcase >= 0:
+            caseList.insert(0, caseListValues[Sta.currentLoadcase])
+        else:
+            caseList.insert(0, caseListValues[0])
+        caseList.config(state='readonly')
+
+    def fn_changeCase(event):
+        '''
+        Changes what is displayed when a different loadcase
+        is selected in the combobox.
+        '''
+        caseListValues = []
+        for case in Sta.loadcasesList:
+            caseListValues.append(case)
+        if Sta.clickType in ['displace', 'bending', 'shear', 'axial']:
+            for child in frame_parent.winfo_children():
+                child.destroy()
+            Sta.clickType = 'select'
+        Sta.currentLoadcase = caseListValues.index(currentCase.get())
+        Sta.whatToDraw()
+
+    def fn_about():
+        '''
+        Opens the 'About' popup.
+        '''
+        messagebox.showinfo(title='About...', message='STA -  programe  ' +
+                            'analysis v 1.0 ' +
+                            ' 2022.')
+
+    # MENU BAR CONFIGURATION
+    menu_file = Menu(menu_bar, tearoff=0)
+    menu_file.add_command(label='New', command=fn_new)
+    menu_file.add_command(label='Open', command=fn_open)
+    menu_file.add_command(label='Save', command=fn_save)
+    menu_file.add_command(label='Save As...', command=fn_saveAs)
+    menu_file.add_separator()
+    menu_file.add_command(label='Quit', command=fn_quit)
+    
+    menu_edit = Menu(menu_bar, tearoff=0)
+    menu_edit.add_command(label='Undo', command=lambda: action.undo(Sta))
+    menu_edit.add_command(label='Redo', command=lambda: action.redo(Sta))
+    
+    menu_edit.add_separator()
+
+    menu_structure = Menu(menu_bar, tearoff=0)
+    menu_structure.add_command(label='New node', command=fn_newNode)
+    menu_structure.add_command(label='New member', command=fn_newMember)
+    menu_structure.add_command(label='Support', command=fn_support)
+    menu_structure.add_command(label='Hinges', command=fn_hinges)
+    menu_structure.add_command(label='Imperfections', command=fn_imperfections)
+    menu_structure.add_separator()
+    menu_structure.add_command(label='Materials',
+                               command=fn_materials)
+    menu_structure.add_command(label='Sections', command=fn_sections)
+    menu_structure.add_command(label='config',command=fn_settings)
+    menu_structure.add_command(label='run',command=fn_runStructure)
+   
+    menu_load = Menu(menu_bar, tearoff=0)
+    menu_load.add_command(label='Loadcases',
+                          command=fn_loadcases)
+    menu_load.add_command(label='Combination',
+                          command=fn_COMBINATIONS)
+    menu_load.add_separator()
+    menu_load.add_command(label='Add nodal forces', command=fn_nodal)
+    menu_load.add_command(label='Add Distributed Loads',
+                          command=fn_memberLoad)
+    menu_load.add_command(label='Add thermal loads',
+                          command=fn_thermal)
+
+    menu_help = Menu(menu_bar, tearoff=0)
+    menu_help.add_command(label='About...', command=fn_about)
+
+    menu_bar.add_cascade(label='File', menu=menu_file)
+    menu_bar.add_cascade(label='Edit', menu=menu_edit)
+    menu_bar.add_cascade(label='Structure', menu=menu_structure)
+    menu_bar.add_cascade(label='Load', menu=menu_load)
+    menu_bar.add_cascade(label='Help', menu=menu_help)
+
+    window_main.config(menu=menu_bar)
+
+   
+    frame_upper.grid_columnconfigure(10, minsize=40)
+    ttk.Label(frame_upper, text='Case:  ').grid(row=0, column=11)
+    currentCase = tk.StringVar()
+    caseList = ttk.Combobox(frame_upper, width=15, textvariable=currentCase)
+    caseList.grid(row=0, column=12)
+    fn_casesUpdate()
+
+    caseList.bind('<<ComboboxSelected>>', fn_changeCase)
+
+    buttons_buttonbar = []
+    tooltips_buttonbar = []
+  
+
+    Sta.redraw()
+    window_main.protocol('WM_DELETE_WINDOW', fn_quit)
+    window_main.mainloop()
+
+
+if __name__ == '__main__':
+    main()
+
+
+
+
+
+
+def draw_bmd(canvas, elements, scale):
+    """
+    FINAL DEBUG v2 - STAdebug (TI Verified)
+    Use global-local consistent normal so BMD matches STAAD.Pro:
+    - Compute normal as (uy, -ux)
+    - For members with dx > 0 (sloped rightwards), flip normal to match visual inward/outward
+    - Positive (sagging) drawn inward/downward.
+    """
+    try:
+        canvas.delete('bmd')
+    except Exception:
+        pass
+
+    eps = 1e-9
+    for e in elements:
+        try:
+            n1, n2 = e.node_i, e.node_j
+            x1, y1 = float(n1.x), float(n1.y)
+            x2, y2 = float(n2.x), float(n2.y)
+        except Exception:
+            continue
+
+        dx = x2 - x1
+        dy = y2 - y1
+        L = (dx*dx + dy*dy) ** 0.5
+        if L == 0:
+            continue
+
+        ux = dx / L
+        uy = dy / L
+
+        # Normal chosen to make positive sagging draw downward like STAAD.Pro
+        nx, ny = uy, -ux
+
+        # Flip for members sloping to the right to keep inward/outward consistent visually
+        if dx > 0 and abs(dy) > eps:
+            nx, ny = -nx, -ny
+
+        M1 = getattr(e, 'Mi', 0.0)
+        M2 = getattr(e, 'Mj', 0.0)
+
+        samples = 8
+        pts = []
+        for i in range(samples):
+            t = i / (samples - 1)
+            Mt = M1 * (1 - t) + M2 * t
+            xt = x1 + dx * t
+            yt = y1 + dy * t
+            offx = nx * Mt * scale
+            offy = ny * Mt * scale
+            pts.extend((xt + offx, yt + offy))
+
+        try:
+            canvas.create_line(*pts, fill='green', width=2, smooth=True, tags='bmd')
+            try:
+                canvas.create_text(x1 + nx*M1*scale, y1 + ny*M1*scale - 8, text=f"{M1:.2f}", fill='green', font=('Arial',8), tags='bmd')
+                canvas.create_text(x2 + nx*M2*scale, y2 + ny*M2*scale - 8, text=f"{M2:.2f}", fill='green', font=('Arial',8), tags='bmd')
+            except Exception:
+                pass
+        except Exception:
+            try:
+                canvas.create_line(*pts)
+            except Exception:
+                pass
+
+
+def draw_sfd(canvas, elements, scale):
+    """
+    Draw shear force diagram per element.
+    Positive shear plotted in same normal orientation as BMD for consistency.
+    """
+    try:
+        canvas.delete('sfd')
+    except Exception:
+        pass
+
+    for e in elements:
+        try:
+            n1, n2 = e.node_i, e.node_j
+            x1, y1 = float(n1.x), float(n1.y)
+            x2, y2 = float(n2.x), float(n2.y)
+        except Exception:
+            continue
+
+        dx = x2 - x1
+        dy = y2 - y1
+        L = (dx*dx + dy*dy) ** 0.5
+        if L == 0:
+            continue
+        ux = dx / L
+        uy = dy / L
+
+        nx, ny = -uy, ux
+        if dy > 0:
+            nx, ny = -nx, -ny
+
+        V1 = getattr(e, 'Vi', 0.0)
+        V2 = getattr(e, 'Vj', 0.0)
+
+        pts = []
+        samples = 4
+        for i in range(samples):
+            t = i / (samples - 1)
+            Vt = V1 * (1 - t) + V2 * t
+            xt = x1 + dx * t
+            yt = y1 + dy * t
+            pts.extend((xt + nx*Vt*scale, yt + ny*Vt*scale))
+
+        try:
+            canvas.create_line(*pts, fill='blue', width=2, smooth=True, tags='sfd')
+            canvas.create_text(x1 + nx*V1*scale, y1 + ny*V1*scale - 8, text=f"{V1:.2f}", fill='blue', font=('Arial',8), tags='sfd')
+            canvas.create_text(x2 + nx*V2*scale, y2 + ny*V2*scale - 8, text=f"{V2:.2f}", fill='blue', font=('Arial',8), tags='sfd')
+        except Exception:
+            pass
+
+
+
+def draw_deflection(canvas, nodes, scale=1.0):
+    """
+    Draw deformed shape: expects nodes with .x, .y and .dx, .dy (displacements).
+    Positive vertical displacement will be drawn downward on screen.
+    """
+    try:
+        canvas.delete('deflection')
+    except Exception:
+        pass
+
+    pts = []
+    for n in nodes:
+        try:
+            x = float(n.x) + float(getattr(n, 'dx', 0.0)) * scale
+            y = float(n.y) + float(getattr(n, 'dy', 0.0)) * scale
+            pts.extend((x, y))
+        except Exception:
+            continue
+
+    if len(pts) >= 4:
+        try:
+            canvas.create_line(*pts, fill='purple', width=2, smooth=True, tags='deflection')
+        except Exception:
+            pass
+
+
+
+def draw_reaction(canvas, support_nodes):
+    """
+    Draw simple reaction arrows at support nodes. Assumes node has x,y and reaction values Rx,Ry.
+    """
+    try:
+        canvas.delete('reaction')
+    except Exception:
+        pass
+
+    for n in support_nodes:
+        try:
+            x = float(n.x); y = float(n.y)
+            Ry = float(getattr(n, 'Ry', 0.0))
+            if abs(Ry) > 1e-6:
+                # draw upward arrow for positive reaction (screen y down)
+                canvas.create_line(x, y+12, x, y, arrow='last', width=2, fill='black', tags='reaction')
+        except Exception:
+            continue
+
+
+
+try:
+    import tkinter as _tk
+    try:
+        if _tk._default_root:
+            _tk._default_root.title('STAdebug – TI Verified')
+    except Exception:
+        pass
+except Exception:
+    pass
+
+
+try:
+    import tkinter as _tk
+    try:
+        if _tk._default_root:
+            _tk._default_root.title('STAdebug v2 – TI Verified')
+    except Exception:
+        pass
+except Exception:
+    pass
