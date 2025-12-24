@@ -829,7 +829,8 @@ def drawShearForce(canvas, member):
 
     f = k*canvas.resultsScale[2]
     
-    # Detect if member is drawn in reverse direction
+    # Detect if member is drawn in reverse direction (right-to-left or bottom-to-top)
+    # This ensures consistent plotting regardless of drawing direction
     reverse = p2[0] < p1[0] or (p2[0] == p1[0] and p2[1] < p1[1])
     if reverse:
         p1, p2 = p2, p1
@@ -930,7 +931,8 @@ def drawNormalForce(canvas, member):
 
     f = canvas.resultsScale[1] * k
     
-    # Detect if member is drawn in reverse direction
+    # Detect if member is drawn in reverse direction (right-to-left or bottom-to-top)
+    # This ensures consistent plotting regardless of drawing direction
     reverse = p2[0] < p1[0] or (p2[0] == p1[0] and p2[1] < p1[1])
     if reverse:
         p1, p2 = p2, p1
@@ -1097,7 +1099,8 @@ def drawDisplacement(canvas, member):
 
     f = canvas.resultsScale[0]
     
-    # Detect if member is drawn in reverse direction
+    # Detect if member is drawn in reverse direction (right-to-left or bottom-to-top)
+    # This ensures consistent plotting regardless of drawing direction
     reverse = p2[0] < p1[0] or (p2[0] == p1[0] and p2[1] < p1[1])
     if reverse:
         p1, p2 = p2, p1
