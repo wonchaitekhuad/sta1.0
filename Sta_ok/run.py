@@ -381,8 +381,6 @@ def linear(Sta):
             dm2 = np.dot(np.dot(RotList[m], RIList[m]), dm1)
             d[n].append(dm2)
 
-            print([dm1[0], dm1[1], dm1[3], dm1[4]])
-
             FeG = np.dot(SList[m], dm1)
             FeL = np.dot(np.dot(RotList[m], RIList[m]), FeG) - F0List[n][m]
             Fe[n].append(FeL)
