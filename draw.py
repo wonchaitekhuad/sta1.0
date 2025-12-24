@@ -811,20 +811,29 @@ def drawThermalLoads(canvas, n):
 def drawShearForce(canvas, member):
     '''
     Draws the shear force diagram for a given member.
+    Direction-independent: handles columns/beams drawn in any orientation.
     '''
-    p1 = canvas.membersList[member].p1
-    p2 = canvas.membersList[member].p2
-    L = canvas.membersList[member].length
-
-    p1 = fn.canvasCoords(canvas, p1)
-    p2 = fn.canvasCoords(canvas, p2)
+    elem = canvas.membersList[member]
+    p1_orig = fn.canvasCoords(canvas, elem.p1)
+    p2_orig = fn.canvasCoords(canvas, elem.p2)
+    L = elem.length
+    
+    # Make copies for potential reversal
+    p1 = list(p1_orig)
+    p2 = list(p2_orig)
     Lcanvas = fn.distance(p1, p2)
 
-    theta = canvas.membersList[member].theta
+    theta = elem.theta
     k = fn.angleSign(theta)
     tAngle = fn.textAngle(theta*180/np.pi)
 
     f = k*canvas.resultsScale[2]
+    
+    # Detect if member is drawn in reverse direction (right-to-left or bottom-to-top)
+    # This ensures consistent plotting regardless of drawing direction
+    reverse = p2[0] < p1[0] or (p2[0] == p1[0] and p2[1] < p1[1])
+    if reverse:
+        p1, p2 = p2, p1
 
     if canvas.currentLoadcase != -1:
         case = canvas.currentLoadcase
@@ -832,6 +841,13 @@ def drawShearForce(canvas, member):
         case = (len(canvas.loadcasesList) + canvas.currentCombination)
 
     V = canvas.forces[case][member][1]
+    X = canvas.displacements[case][member][3]
+    
+    # Reverse arrays if member was drawn backwards
+    if reverse:
+        V = list(reversed(V))
+        X = [L - x for x in reversed(X)]
+    
     V0, V1 = V[0], V[-1]
     V0t = fn.unitConvert('kN', canvas.units[1], V0)
     V1t = fn.unitConvert('kN', canvas.units[1], V1)
@@ -872,7 +888,6 @@ def drawShearForce(canvas, member):
     else:
         curve = []
 
-        X = canvas.displacements[case][member][3]
         for i in range(41):
             x = int(i*L/40)
             a = np.argmin(np.absolute(X-x))
@@ -881,7 +896,7 @@ def drawShearForce(canvas, member):
 
         canvas.canvas.create_line(curve, fill='red')
 
-        imax = np.argmax(V)
+        imax = np.argmax(np.absolute(V))
         xmax = X[imax]
         Vmax = V[imax]
         Vmaxt = fn.unitConvert('kN', canvas.units[1], Vmax)
@@ -899,20 +914,28 @@ def drawShearForce(canvas, member):
 def drawNormalForce(canvas, member):
     '''
     Draws the normal force diagram for a given member.
+    Direction-independent: handles columns/beams drawn in any orientation.
     '''
+    elem = canvas.membersList[member]
+    p1_orig = fn.canvasCoords(canvas, elem.p1)
+    p2_orig = fn.canvasCoords(canvas, elem.p2)
 
-    p1 = canvas.membersList[member].p1
-    p2 = canvas.membersList[member].p2
-
-    p1 = fn.canvasCoords(canvas, p1)
-    p2 = fn.canvasCoords(canvas, p2)
+    # Make copies for potential reversal
+    p1 = list(p1_orig)
+    p2 = list(p2_orig)
     Lcanvas = fn.distance(p1, p2)
 
-    theta = canvas.membersList[member].theta
+    theta = elem.theta
     k = fn.angleSign(theta)
     tAngle = fn.textAngle(theta*180/np.pi)
 
     f = canvas.resultsScale[1] * k
+    
+    # Detect if member is drawn in reverse direction (right-to-left or bottom-to-top)
+    # This ensures consistent plotting regardless of drawing direction
+    reverse = p2[0] < p1[0] or (p2[0] == p1[0] and p2[1] < p1[1])
+    if reverse:
+        p1, p2 = p2, p1
 
     if canvas.currentLoadcase != -1:
         case = canvas.currentLoadcase
@@ -920,11 +943,10 @@ def drawNormalForce(canvas, member):
         case = (len(canvas.loadcasesList) + canvas.currentCombination)
 
     N = canvas.forces[case][member][0]
-
-    if canvas.currentLoadcase != -1:
-        case = canvas.currentLoadcase
-    else:
-        case = (len(canvas.loadcasesList) + canvas.currentCombination)
+    
+    # Reverse array if member was drawn backwards
+    if reverse:
+        N = list(reversed(N))
 
     if np.absolute(N[0]) > 0.1:
         p1p = fn.rotate([p2[0]-Lcanvas, p2[1]-f*N[0]], p2, theta)
@@ -967,74 +989,91 @@ def drawNormalForce(canvas, member):
 def drawBendingMoment(canvas, member):
     '''
     Draws the bending moment diagram for a given member.
+    Direction-independent: handles columns/beams drawn in any orientation.
     '''
-    p1 = canvas.membersList[member].p1
-    p2 = canvas.membersList[member].p2
-    L = canvas.membersList[member].length
-
-    p1 = fn.canvasCoords(canvas, p1)
-    p2 = fn.canvasCoords(canvas, p2)
+    # Get element data
+    elem = canvas.membersList[member]
+    p1_orig = fn.canvasCoords(canvas, elem.p1)
+    p2_orig = fn.canvasCoords(canvas, elem.p2)
+    L = elem.length
+    
+    # Make copies for potential reversal
+    p1 = list(p1_orig)
+    p2 = list(p2_orig)
     Lcanvas = fn.distance(p1, p2)
-
-    theta = canvas.membersList[member].theta
+    
+    theta = elem.theta
     k = fn.angleSign(theta)
     tAngle = fn.textAngle(theta*180/np.pi)
-
+    
     f = canvas.resultsScale[3]*k
-
+    
+    # Detect if member is drawn in reverse direction (bottom-to-top or right-to-left)
+    # This ensures consistent plotting regardless of drawing direction
+    reverse = p2[0] < p1[0] or (p2[0] == p1[0] and p2[1] < p1[1])
+    if reverse:
+        p1, p2 = p2, p1
+    
+    # Get load case
     if canvas.currentLoadcase != -1:
         case = canvas.currentLoadcase
     else:
         case = (len(canvas.loadcasesList) + canvas.currentCombination)
-
+    
+    # Get moment array
     M = canvas.forces[case][member][2]
+    X = canvas.displacements[case][member][3]
+    
+    # Reverse moment array if member was drawn backwards
+    if reverse:
+        M = list(reversed(M))
+        X = [L - x for x in reversed(X)]
+    
     M0, M1 = M[0], M[-1]
     M0t = fn.unitConvert('kN.cm', canvas.units[2], M0)
     M1t = fn.unitConvert('kN.cm', canvas.units[2], M1)
-
-    if canvas.currentLoadcase != -1:
-        case = canvas.currentLoadcase
-    else:
-        case = (len(canvas.loadcasesList) + canvas.currentCombination)
-
+    
+    # Draw moment values at start point
     if np.absolute(M0) > 0.1:
         p1p = fn.rotate([p1[0], p1[1]+f*M0], p1, theta)
         textpos = fn.rotate([p1[0], p1[1]+f*M0-np.sign(-M0)*12], p1, theta)
-
+        
         canvas.canvas.create_line(p1p, p1, fill='green')
         canvas.canvas.create_text(textpos,
                                   text='{:.2f}'.format(np.absolute(M0t)),
                                   fill='green', angle=tAngle)
-
+    
+    # Draw moment values at end point
     if np.absolute(M1) > 0.1:
         p2p = fn.rotate([p1[0]+Lcanvas, p1[1]+f*(M1)], p1, theta)
         textpos = fn.rotate([p1[0]+Lcanvas,
                              p1[1]+f*(M1)-np.sign(-M1)*12], p1, theta)
-
+        
         canvas.canvas.create_line(p2p, p2, fill='green')
         canvas.canvas.create_text(textpos,
                                   text='{:.2f}'.format(np.absolute(M1t)),
                                   fill='green', angle=tAngle)
-
+    
+    # Draw moment curve
     curve = []
-    X = canvas.displacements[case][member][3]
     for i in range(21):
         x = int(i*L/20)
         a = np.argmin(np.absolute(X-x))
         p = fn.rotate([p1[0]+x*canvas.scale, p1[1]+f*M[a]], p1, theta)
         curve.append(p)
-
+    
     canvas.canvas.create_line(curve, fill='green')
-
-    imax = np.argmax(M)
+    
+    # Draw maximum moment value
+    imax = np.argmax(np.absolute(M))
     xmax, Mmax = X[imax], M[imax]
     Mmaxt = fn.unitConvert('kN.cm', canvas.units[2], Mmax)
-
+    
     px = fn.rotate([p1[0]+xmax*canvas.scale, p1[1]], p1, theta)
     pm = fn.rotate([p1[0]+xmax*canvas.scale, p1[1]+f*Mmax], p1, theta)
     textpos = fn.rotate([p1[0]+xmax*canvas.scale,
                          p1[1]+f*Mmax-np.sign(-Mmax)*12], p1, theta)
-
+    
     canvas.canvas.create_line(pm, px, fill='green')
     canvas.canvas.create_text(textpos,
                               text='{:.2f}'.format(np.absolute(Mmaxt)),
@@ -1044,18 +1083,27 @@ def drawBendingMoment(canvas, member):
 def drawDisplacement(canvas, member):
     '''
     Draws the deformed structure.
+    Direction-independent: handles columns/beams drawn in any orientation.
     '''
-    p1 = canvas.membersList[member].p1
-    p2 = canvas.membersList[member].p2
-    L = canvas.membersList[member].length
+    elem = canvas.membersList[member]
+    p1_orig = fn.canvasCoords(canvas, elem.p1)
+    p2_orig = fn.canvasCoords(canvas, elem.p2)
+    L = elem.length
 
-    p1 = fn.canvasCoords(canvas, p1)
-    p2 = fn.canvasCoords(canvas, p2)
+    # Make copies for potential reversal
+    p1 = list(p1_orig)
+    p2 = list(p2_orig)
     Lcanvas = fn.distance(p1, p2)
 
-    theta = canvas.membersList[member].theta
+    theta = elem.theta
 
     f = canvas.resultsScale[0]
+    
+    # Detect if member is drawn in reverse direction (right-to-left or bottom-to-top)
+    # This ensures consistent plotting regardless of drawing direction
+    reverse = p2[0] < p1[0] or (p2[0] == p1[0] and p2[1] < p1[1])
+    if reverse:
+        p1, p2 = p2, p1
 
     if canvas.currentLoadcase != -1:
         case = canvas.currentLoadcase
@@ -1064,12 +1112,18 @@ def drawDisplacement(canvas, member):
 
     u = canvas.displacements[case][member][0]
     v = canvas.displacements[case][member][1]
+    X = canvas.displacements[case][member][3]
+    
+    # Reverse arrays if member was drawn backwards
+    if reverse:
+        u = list(reversed(u))
+        v = list(reversed(v))
+        X = [L - x for x in reversed(X)]
 
     p0 = fn.rotate([p1[0]+f*canvas.scale*u[0],
                     p1[1]-f*canvas.scale*v[0]], p1, theta)
 
     curve = [p0]
-    X = canvas.displacements[case][member][3]
     nsteps = max(20, int(L/20))
 
     for i in range(nsteps):
